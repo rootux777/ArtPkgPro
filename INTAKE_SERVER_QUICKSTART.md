@@ -6,16 +6,16 @@
 
 **Option A: Environment Variable (Simple)**
 ```bash
-export ARTPKG_INTAKE_CREDENTIALS='tester1:pilot_secret_1,tester2:pilot_secret_2,tester3:pilot_secret_3'
+export ARTPKG_INTAKE_CREDENTIALS='tester1:secret1,tester2:secret2,tester3:secret3'
 ```
 
 **Option B: Credentials File (Recommended)**
 ```bash
 cat > credentials.json <<EOF
 {
-  "tester1": "pilot_secret_1",
-  "tester2": "pilot_secret_2",
-  "tester3": "pilot_secret_3"
+  "tester1": "secret1",
+  "tester2": "secret2",
+  "tester3": "secret3"
 }
 EOF
 
@@ -41,7 +41,7 @@ Open a browser and navigate to `http://localhost:8765/`
 
 When prompted by the browser's Basic Auth dialog, enter:
 - **Username**: `tester1` (or `tester2`, `tester3`)
-- **Password**: `pilot_secret_1` (or corresponding password)
+- **Password**: `secret1` (or corresponding password)
 
 ## Command-Line Testing
 
@@ -52,13 +52,13 @@ When prompted by the browser's Basic Auth dialog, enter:
 curl http://localhost:8765/
 
 # Valid credentials
-curl -u tester1:pilot_secret_1 http://localhost:8765/
+curl -u tester1:secret1 http://localhost:8765/
 
 # Wrong password → 401
 curl -u tester1:wrongpass http://localhost:8765/
 
 # Different user, different session
-curl -u tester2:pilot_secret_2 http://localhost:8765/api/session?dir=tester1_session_path
+curl -u tester2:secret2 http://localhost:8765/api/session?dir=tester1_session_path
 # → 403 Forbidden (cross-user access denied)
 ```
 
@@ -132,26 +132,26 @@ Error: `"payload too large (max 10MiB)"`
 ### Single User Test
 ```bash
 # Start server
-export ARTPKG_INTAKE_CREDENTIALS='alice:pilot_secret_1'
+export ARTPKG_INTAKE_CREDENTIALS='alice:secret1'
 python tools/artpkg_intake_server.py --workspace . --host 0.0.0.0 --port 8765
 
 # Authenticate and create session
-curl -u alice:pilot_secret_1 -F "file=@test.md" http://localhost:8765/api/intake
+curl -u alice:secret1 -F "file=@test.md" http://localhost:8765/api/intake
 ```
 
 ### Three-User Concurrent Test
 ```bash
 # Configure three users
-export ARTPKG_INTAKE_CREDENTIALS='tester1:pilot_secret_1,tester2:pilot_secret_2,tester3:pilot_secret_3'
+export ARTPKG_INTAKE_CREDENTIALS='tester1:secret1,tester2:secret2,tester3:secret3'
 python tools/artpkg_intake_server.py --workspace . --host 0.0.0.0 --port 8765
 
 # In separate terminals, each user can:
-curl -u tester1:pilot_secret_1 -F "file=@file1.md" http://localhost:8765/api/intake
-curl -u tester2:pilot_secret_2 -F "file=@file2.md" http://localhost:8765/api/intake
-curl -u tester3:pilot_secret_3 -F "file=@file3.md" http://localhost:8765/api/intake
+curl -u tester1:secret1 -F "file=@file1.md" http://localhost:8765/api/intake
+curl -u tester2:secret2 -F "file=@file2.md" http://localhost:8765/api/intake
+curl -u tester3:secret3 -F "file=@file3.md" http://localhost:8765/api/intake
 
 # Verify cross-user access is blocked
-curl -u tester1:pilot_secret_1 http://localhost:8765/api/session?dir=<tester2_session_path>
+curl -u tester1:secret1 http://localhost:8765/api/session?dir=<tester2_session_path>
 # → 403 Forbidden
 ```
 
