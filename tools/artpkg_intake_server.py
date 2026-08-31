@@ -1,9 +1,10 @@
-"""Local ArtPkg intake web UI server."""
+"""Local ArtPkg intake web UI server with authentication and ownership enforcement."""
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import tempfile
 import webbrowser
 from dataclasses import dataclass
@@ -11,12 +12,17 @@ from email.parser import BytesParser
 from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 import artpkg_intake
 import artpkg_archify_projection
 import artpkg_archify_runner
+import artpkg_intake_auth
+
+
+# 10 MiB limit for uploads (in bytes)
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
 
 @dataclass
@@ -60,6 +66,29 @@ def resolve_session_dir(session_dir: str, workspace: str | Path) -> Path:
     return resolved_session_dir
 
 
+def resolve_session_dir_with_owner(session_dir: str, username: str, workspace: str | Path) -> Path:
+    """
+    Resolve session directory and enforce per-user ownership.
+    
+    Session directory must be:
+    1. Within the user's namespace
+    2. Formatted as .artpkg/users/{username}/sessions/{session_id}
+    
+    Raises ValueError if session is outside user's namespace.
+    """
+    workspace_path = Path(workspace).expanduser().resolve()
+    user_sessions_dir = (workspace_path / ".artpkg" / "users" / username / "sessions").resolve()
+    
+    resolved_session_dir = Path(session_dir).expanduser().resolve()
+    
+    try:
+        resolved_session_dir.relative_to(user_sessions_dir)
+    except ValueError as exc:
+        raise ValueError("session directory is outside the authenticated user's namespace") from exc
+    
+    return resolved_session_dir
+
+
 def load_workspace_session(session_dir: str, workspace: str | Path) -> dict[str, Any]:
     resolved_session_dir = resolve_session_dir(session_dir, workspace)
     session = artpkg_intake.load_intake_session(resolved_session_dir)
@@ -67,8 +96,79 @@ def load_workspace_session(session_dir: str, workspace: str | Path) -> dict[str,
     return session
 
 
-def projection_html_response(session_dir: str, workspace: str | Path) -> tuple[int, dict[str, str], bytes]:
-    resolved_session_dir = resolve_session_dir(session_dir, workspace)
+def load_workspace_session_with_owner(session_dir: str, username: str, workspace: str | Path) -> dict[str, Any]:
+    """
+    Load session for authenticated user, enforcing ownership.
+    
+    Raises ValueError if session is outside user's namespace.
+    """
+    resolved_session_dir = resolve_session_dir_with_owner(session_dir, username, workspace)
+    session = artpkg_intake.load_intake_session(resolved_session_dir)
+    session["session_dir"] = str(resolved_session_dir)
+    return session
+
+
+def _relocate_paths(value: Any, old_root: Path, new_root: Path) -> Any:
+    if isinstance(value, dict):
+        return {key: _relocate_paths(item, old_root, new_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relocate_paths(item, old_root, new_root) for item in value]
+    if isinstance(value, str):
+        old_prefix = str(old_root)
+        if value == old_prefix or value.startswith(old_prefix + os.sep):
+            return str(new_root) + value[len(old_prefix):]
+    return value
+
+
+def create_intake_session_for_user(source: Path, username: str, workspace: str | Path, template_path: Path | None = None) -> dict[str, Any]:
+    """
+    Create a new intake session in the user's namespace.
+    
+    Session directory will be: .artpkg/users/{username}/sessions/{session_id}
+    
+    Creates session using artpkg_intake, then moves it to user namespace.
+    """
+    workspace_path = Path(workspace).expanduser().resolve()
+    user_sessions_dir = (workspace_path / ".artpkg" / "users" / username / "sessions").resolve()
+    
+    # Create session using normal artpkg_intake path first
+    session = artpkg_intake.create_intake_session(source, workspace, template_path=template_path)
+    
+    # Move session to user namespace
+    old_session_dir = Path(session["session_dir"])
+    session_id = old_session_dir.name
+    new_session_dir = user_sessions_dir / session_id
+    
+    # Create user sessions directory if it doesn't exist
+    user_sessions_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Move the session directory
+    shutil.move(str(old_session_dir), str(new_session_dir))
+    
+    # Relocate session metadata and provenance paths rooted in the old directory.
+    session = _relocate_paths(session, old_session_dir, new_session_dir)
+    for filename in ("answers.json", "seed.json"):
+        path = new_session_dir / filename
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        relocated = _relocate_paths(payload, old_session_dir, new_session_dir)
+        path.write_text(json.dumps(relocated, indent=2, sort_keys=True, ensure_ascii=True) + "\n", encoding="utf-8")
+    
+    # Update the session.json file to reflect new path
+    artpkg_intake.save_intake_session(session)
+    
+    return session
+
+
+def projection_html_response(
+    session_dir: str,
+    workspace: str | Path,
+    username: str | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    resolved_session_dir = (
+        resolve_session_dir_with_owner(session_dir, username, workspace)
+        if username is not None
+        else resolve_session_dir(session_dir, workspace)
+    )
     html_path = resolved_session_dir / "artpkg-readiness.architecture.html"
     if not html_path.exists():
         raise FileNotFoundError("projection HTML has not been generated")
@@ -175,7 +275,7 @@ def decorate_projection_html(html_path: str | Path, mapping_path: str | Path) ->
 def archify_config_for_session(session: dict[str, Any]) -> artpkg_archify_runner.ArchifyConfig:
     return artpkg_archify_runner.ArchifyConfig(
         node_executable=os.environ.get("ARTPKG_NODE", "node"),
-        archify_root=os.environ.get("ARTPKG_ARCHIFY_ROOT", "D:/archify/archify"),
+        archify_root=os.environ.get("ARTPKG_ARCHIFY_ROOT", ""),
         quality=os.environ.get("ARTPKG_ARCHIFY_QUALITY", "showcase"),
         receipt_dir=session["session_dir"],
     )
@@ -212,6 +312,45 @@ class IntakeHandler(BaseHTTPRequestHandler):
     workspace = Path.cwd()
     template_path: Path | None = None
 
+    def _get_authenticated_user(self) -> Optional[str]:
+        """
+        Extract and validate authenticated user from Authorization header.
+        
+        Returns username if valid, None otherwise.
+        Never logs the header value or decoded credentials.
+        """
+        auth_header = self.headers.get('Authorization', '')
+        username = artpkg_intake_auth.validate_basic_auth(auth_header)
+        return username
+
+    def _send_auth_required(self) -> None:
+        """Send 401 Unauthorized response."""
+        body = json.dumps({"error": "unauthorized"}, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", "Basic realm=\"ArtPkg Intake\"")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_forbidden(self) -> None:
+        """Send 403 Forbidden response."""
+        body = json.dumps({"error": "forbidden"}, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_payload_too_large(self) -> None:
+        """Send 413 Payload Too Large response."""
+        body = json.dumps({"error": f"payload too large (max {MAX_UPLOAD_SIZE // (1024*1024)}MiB)"}, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        self.send_response(413)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _json(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True).encode("utf-8")
         self.send_response(status)
@@ -221,27 +360,56 @@ class IntakeHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/":
-            html = (Path(__file__).with_name("artpkg_intake_ui.html")).read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(html)))
-            self.end_headers()
-            self.wfile.write(html)
+        # Authenticate all GET requests
+        username = self._get_authenticated_user()
+        if not username:
+            self._send_auth_required()
             return
+        
+        parsed = urlparse(self.path)
+        
+        if parsed.path == "/":
+            try:
+                html = (Path(__file__).with_name("artpkg_intake_ui.html")).read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(html)))
+                self.end_headers()
+                self.wfile.write(html)
+            except Exception as exc:
+                self._json(500, {"error": str(exc)})
+            return
+        
         if parsed.path == "/api/session":
             try:
                 params = parse_qs(parsed.query)
-                session = load_workspace_session(params.get("dir", [""])[0], self.workspace)
+                session_dir = params.get("dir", [""])[0]
+                
+                # Enforce ownership
+                try:
+                    session = load_workspace_session_with_owner(session_dir, username, self.workspace)
+                except ValueError:
+                    self._send_forbidden()
+                    return
+                
                 self._json(200, session_summary(session))
             except Exception as exc:
                 self._json(400, {"error": str(exc)})
             return
+        
         if parsed.path == "/api/session/projection-html":
             try:
                 params = parse_qs(parsed.query)
-                status, headers, body = projection_html_response(params.get("dir", [""])[0], self.workspace)
+                session_dir = params.get("dir", [""])[0]
+                
+                # Enforce ownership
+                try:
+                    resolve_session_dir_with_owner(session_dir, username, self.workspace)
+                except ValueError:
+                    self._send_forbidden()
+                    return
+                
+                status, headers, body = projection_html_response(session_dir, self.workspace, username)
                 self.send_response(status)
                 for name, value in headers.items():
                     self.send_header(name, value)
@@ -250,64 +418,113 @@ class IntakeHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json(404, {"error": str(exc)})
             return
+        
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
+        # Authenticate all POST requests
+        username = self._get_authenticated_user()
+        if not username:
+            self._send_auth_required()
+            return
+        
+        # Check Content-Length before reading body
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._json(400, {"error": "invalid Content-Length"})
+            return
+        
+        if content_length > MAX_UPLOAD_SIZE:
+            self._send_payload_too_large()
+            return
+        
         try:
             parsed = urlparse(self.path)
-            length = int(self.headers.get("Content-Length", "0"))
-            body = self.rfile.read(length)
+            body = self.rfile.read(content_length)
+            
             if parsed.path == "/api/intake":
-                upload = parse_multipart_upload(self.headers.get("Content-Type", ""), body)
-                if Path(upload.filename).suffix.lower() not in {".md", ".markdown", ".txt"}:
-                    raise ValueError("unsupported upload type")
-                upload_dir = Path(tempfile.mkdtemp(prefix="artpkg-upload-"))
-                source = upload_dir / Path(upload.filename).name
-                source.write_bytes(upload.content)
-                session = artpkg_intake.create_intake_session(source, self.workspace, template_path=self.template_path)
-                self._json(200, session_summary(session))
+                upload_dir = None
+                try:
+                    upload = parse_multipart_upload(self.headers.get("Content-Type", ""), body)
+                    if Path(upload.filename).suffix.lower() not in {".md", ".markdown", ".txt"}:
+                        raise ValueError("unsupported upload type")
+                    
+                    # Create temporary upload directory
+                    upload_dir = Path(tempfile.mkdtemp(prefix="artpkg-upload-"))
+                    source = upload_dir / Path(upload.filename).name
+                    source.write_bytes(upload.content)
+                    
+                    try:
+                        # Create session in user's namespace
+                        session = create_intake_session_for_user(source, username, self.workspace, template_path=self.template_path)
+                        self._json(200, session_summary(session))
+                    finally:
+                        # Always clean up temporary upload directory
+                        if upload_dir and upload_dir.exists():
+                            shutil.rmtree(upload_dir, ignore_errors=True)
+                except Exception as exc:
+                    # Clean up on error
+                    if upload_dir and upload_dir.exists():
+                        shutil.rmtree(upload_dir, ignore_errors=True)
+                    raise exc
                 return
 
             payload = json.loads(body.decode("utf-8") or "{}")
-            session = load_workspace_session(payload["session_dir"], self.workspace)
+            session_dir = payload.get("session_dir", "")
+            
+            # Enforce ownership on all session operations
+            try:
+                session = load_workspace_session_with_owner(session_dir, username, self.workspace)
+            except ValueError:
+                self._send_forbidden()
+                return
+            
             if parsed.path == "/api/session/confirm":
-                artpkg_intake.confirm_answer(session, payload["question_id"], payload.get("reviewer", "UI reviewer"))
+                artpkg_intake.confirm_answer(session, payload["question_id"], username)
                 self._json(200, session_summary(session))
                 return
+            
             if parsed.path == "/api/session/answer":
                 artpkg_intake.provide_answer(
                     session,
                     payload["question_id"],
                     payload.get("value"),
-                    payload.get("reviewer", "UI reviewer"),
+                    username,
                     payload.get("state", "PROVIDED"),
                 )
                 self._json(200, session_summary(session))
                 return
+            
             if parsed.path == "/api/session/reject":
-                artpkg_intake.reject_seeded_answer(session, payload["question_id"], payload.get("reason", "Rejected in UI"), payload.get("reviewer", "UI reviewer"))
+                artpkg_intake.reject_seeded_answer(session, payload["question_id"], payload.get("reason", "Rejected in UI"), username)
                 self._json(200, session_summary(session))
                 return
+            
             if parsed.path == "/api/session/record/confirm":
-                artpkg_intake.confirm_record(session, payload["record_id"], payload.get("reviewer", "UI reviewer"))
+                artpkg_intake.confirm_record(session, payload["record_id"], username)
                 self._json(200, session_summary(session))
                 return
+            
             if parsed.path == "/api/session/record/reject":
-                artpkg_intake.reject_seeded_record(session, payload["record_id"], payload.get("reason", "Rejected in UI"), payload.get("reviewer", "UI reviewer"))
+                artpkg_intake.reject_seeded_record(session, payload["record_id"], payload.get("reason", "Rejected in UI"), username)
                 self._json(200, session_summary(session))
                 return
+            
             if parsed.path == "/api/session/project":
                 summary = session_summary(session)
                 summary["projection"] = build_projection_summary(session)
                 self._json(200, summary)
                 return
+            
             self._json(404, {"error": "not found"})
+        
         except Exception as exc:
             self._json(400, {"error": str(exc)})
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the local ArtPkg intake UI.")
+    parser = argparse.ArgumentParser(description="Run the local ArtPkg intake UI with authentication.")
     parser.add_argument("--workspace", default=".")
     parser.add_argument("--template", default=None)
     parser.add_argument("--host", default="127.0.0.1")
@@ -315,11 +532,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--open", action="store_true")
     args = parser.parse_args(argv)
 
+    # Validate that credentials are configured
+    credentials = artpkg_intake_auth.get_configured_credentials()
+    if not credentials:
+        print("ERROR: No credentials configured. Set ARTPKG_INTAKE_CREDENTIALS or ARTPKG_INTAKE_CREDENTIALS_FILE.")
+        return 1
+
     IntakeHandler.workspace = Path(args.workspace).expanduser().resolve()
     IntakeHandler.template_path = Path(args.template).expanduser().resolve() if args.template else None
     server = ThreadingHTTPServer((args.host, args.port), IntakeHandler)
     url = f"http://{args.host}:{args.port}/"
+    configured_users = ", ".join(sorted(credentials.keys()))
     print(f"ArtPkg intake UI running at {url}")
+    print(f"Configured users: {configured_users}")
     if args.open:
         webbrowser.open(url)
     try:
