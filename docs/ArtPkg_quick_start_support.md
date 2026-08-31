@@ -82,9 +82,9 @@ Create a credentials file before starting the server:
 ```sh
 cat > artpkg-credentials.json <<'EOF'
 {
-  "tester1": "secret1",
-  "tester2": "secret2",
-  "tester3": "secret3"
+  "tester1": "pilot_secret_1",
+  "tester2": "pilot_secret_2",
+  "tester3": "pilot_secret_3"
 }
 EOF
 ```
@@ -93,6 +93,8 @@ This file contains credentials for the bounded three-user LAN pilot. Each user:
 - Gets their own session namespace in `.artpkg/users/{username}/sessions/`
 - Cannot access other users' sessions
 - Has a 10 MiB upload size limit per request
+
+See also: [.credentials.example.json](../../.credentials.example.json) for the canonical template.
 
 ### 3b. Starting the Server with Authentication
 
