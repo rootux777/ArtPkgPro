@@ -11,6 +11,23 @@ import artpkg_archify_runner as runner
 
 
 class ArchifyRunnerTests(unittest.TestCase):
+    def test_missing_archify_root_returns_actionable_receipt_without_invoking_node(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            artifact = Path(temp_dir) / "input.json"
+            artifact.write_text("{}", encoding="utf-8")
+            config = runner.ArchifyConfig(archify_root="  ", receipt_dir=temp_dir)
+            with patch("artpkg_archify_runner.subprocess.run") as run:
+                result = runner.run_archify_validate(config, "architecture", artifact)
+
+            persisted = json.loads(Path(result["receipt_path"]).read_text(encoding="utf-8"))
+
+        run.assert_not_called()
+        self.assertFalse(result["ok"])
+        self.assertEqual("ARCHIFY_ROOT_NOT_CONFIGURED", result["exit_code"])
+        self.assertIn("ARTPKG_ARCHIFY_ROOT", result["receipt"]["error"])
+        self.assertIn("bin/archify.mjs", result["receipt"]["error"])
+        self.assertEqual("ARCHIFY_ROOT_NOT_CONFIGURED", persisted["exit_code"])
+
     def test_validate_uses_explicit_node_and_archify_root(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact = Path(temp_dir) / "input.json"
@@ -44,7 +61,7 @@ class ArchifyRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact = Path(temp_dir) / "input.json"
             artifact.write_text("{}", encoding="utf-8")
-            config = runner.ArchifyConfig(receipt_dir=temp_dir, timeout_seconds=3)
+            config = runner.ArchifyConfig(archify_root=temp_dir, receipt_dir=temp_dir, timeout_seconds=3)
             with patch("artpkg_archify_runner.subprocess.run", side_effect=runner.subprocess.TimeoutExpired(["node"], 3)):
                 result = runner.run_archify_validate(config, "architecture", artifact)
 
@@ -63,7 +80,7 @@ class ArchifyRunnerTests(unittest.TestCase):
             html = Path(temp_dir) / "output.html"
             artifact.write_text("{}", encoding="utf-8")
             html.write_text("<html>current</html>", encoding="utf-8")
-            config = runner.ArchifyConfig(receipt_dir=temp_dir)
+            config = runner.ArchifyConfig(archify_root=temp_dir, receipt_dir=temp_dir)
             completed = runner.subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
@@ -114,7 +131,7 @@ class ArchifyRunnerTests(unittest.TestCase):
         self.assertEqual("bad diagram", result["receipt"]["error"])
 
     def test_invalid_json_result_is_not_success(self):
-        config = runner.ArchifyConfig()
+        config = runner.ArchifyConfig(archify_root=".")
         completed = runner.subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -129,7 +146,7 @@ class ArchifyRunnerTests(unittest.TestCase):
         self.assertEqual("not json", result["receipt"]["stdout"])
 
     def test_non_object_json_result_is_not_success(self):
-        config = runner.ArchifyConfig()
+        config = runner.ArchifyConfig(archify_root=".")
         completed = runner.subprocess.CompletedProcess(
             args=[],
             returncode=0,

@@ -13,7 +13,7 @@ from typing import Any
 @dataclass
 class ArchifyConfig:
     node_executable: str = "node"
-    archify_root: str = "D:/archify/archify"
+    archify_root: str = ""
     quality: str = "showcase"
     receipt_dir: str | None = None
     timeout_seconds: int = 60
@@ -62,6 +62,31 @@ def _run(config: ArchifyConfig, args: list[str]) -> dict[str, Any]:
     artifact_path = _artifact_path(operation, args)
     output_path = _output_path(operation, args)
     artifact_sha256 = sha256_file(artifact_path) if artifact_path and Path(artifact_path).exists() else None
+    if not config.archify_root.strip():
+        result = {
+            "ok": False,
+            "operation": operation,
+            "diagram_type": diagram_type,
+            "exit_code": "ARCHIFY_ROOT_NOT_CONFIGURED",
+            "command": command,
+            "cwd": config.archify_root,
+            "artifact_path": artifact_path,
+            "artifact_sha256": artifact_sha256,
+            "output_path": output_path,
+            "output_sha256": sha256_file(output_path) if output_path and Path(output_path).exists() else None,
+            "timeout_seconds": config.timeout_seconds,
+            "created": _now(),
+            "receipt": {
+                "ok": False,
+                "error": (
+                    "Archify is not configured. Set ARTPKG_ARCHIFY_ROOT to the Archify package directory "
+                    "that contains bin/archify.mjs, then restart the ArtPkg intake server."
+                ),
+            },
+            "stderr": "",
+        }
+        _write_receipt(config, operation, result)
+        return result
     try:
         completed = subprocess.run(command, cwd=config.archify_root, text=True, capture_output=True, timeout=config.timeout_seconds)
         exit_code: int | str = completed.returncode
@@ -79,6 +104,18 @@ def _run(config: ArchifyConfig, args: list[str]) -> dict[str, Any]:
         stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
         receipt = {"ok": False, "error": "Archify command timed out"}
+        ok = False
+    except OSError as exc:
+        exit_code = "ARCHIFY_INVOCATION_FAILED"
+        stdout = ""
+        stderr = str(exc)
+        receipt = {
+            "ok": False,
+            "error": (
+                f"Could not invoke Archify in {config.archify_root!r}: {exc}. Set the ARTPKG_ARCHIFY_ROOT "
+                "environment variable to a local Archify checkout path before running visualizations."
+            ),
+        }
         ok = False
 
     result = {
