@@ -1,0 +1,25 @@
+services:
+  artpkg:
+    image: artpkg:0.3.1-linux-amd64
+    container_name: artpkg
+    pull_policy: never
+    user: "1000:1000"
+    ports:
+      - "${ARTPKG_BIND_ADDRESS:-127.0.0.1}:${ARTPKG_PORT:-8555}:8080"
+    volumes:
+      - type: bind
+        source: ${ARTPKG_DATA_PATH:-/home/rootux/artpkg-data}
+        target: /data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    privileged: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "artpkg", "healthcheck", "--host", "127.0.0.1", "--port", "8080"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
