@@ -129,10 +129,10 @@ From another terminal, verify with Basic Auth:
 curl -s -m 3 -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8765/
 
 # Authenticated request (should return 200 OK)
-curl -s -m 3 -u tester1:secret1 -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8765/
+curl -s -m 3 -u tester1:pilot_secret_1 -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8765/
 
 # Authenticated request through the host LAN address (should return 200 OK)
-curl -s -m 3 -u tester1:secret1 -o /dev/null -w 'LAN HTTP %{http_code}\n' http://192.168.1.163:8765/
+curl -s -m 3 -u tester1:pilot_secret_1 -o /dev/null -w 'LAN HTTP %{http_code}\n' http://192.168.1.163:8765/
 ```
 
 Expected: the unauthenticated request returns `401`; both authenticated requests return `200`.
@@ -161,14 +161,14 @@ sudo docker ps --filter name=archify --format '{{.Names}}\t{{.Status}}'
 curl -s -m 5 -o /dev/null -w 'HTTP %{http_code}\n' http://127.0.0.1:8666/
 
 echo "-- Local intake UI --"
-curl -s -m 3 -u tester1:secret1 -o /dev/null -w 'HTTP %{http_code}\n' http://192.168.1.163:8765/
+curl -s -m 3 -u tester1:pilot_secret_1 -o /dev/null -w 'HTTP %{http_code}\n' http://192.168.1.163:8765/
 ```
 
 ## Common Issues
 
 - **`python: command not found` but `python3` works** → pyenv global is `system`. Run `pyenv global 3.12.8` (see Section 0).
 - **`curl` to `8555`/`8666` times out** → container isn't running; check with `docker ps`, then `docker compose -f compose.portainer.yml up -d`.
-- **Intake UI returns 401 Unauthorized** → credentials not provided. Use `curl -u tester1:secret1 http://127.0.0.1:8765/` to authenticate.
+- **Intake UI returns 401 Unauthorized** → credentials not provided. Use `curl -u tester1:pilot_secret_1 http://127.0.0.1:8765/` to authenticate.
 - **Server exits with "No credentials configured"** → credentials file not found or `ARTPKG_INTAKE_CREDENTIALS_FILE` not set. Verify file exists and path is correct.
 - **LAN clients cannot connect to port 8765** → confirm the server was started with `--host 0.0.0.0`, then check the host firewall permits TCP port `8765` from the trusted LAN only.
 - **Each user must authenticate separately** → each session is isolated per user in `.artpkg/users/{username}/sessions/`. Users cannot access each other's sessions.
