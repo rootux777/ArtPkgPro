@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ArtPkg · UX/UI preparation</title>
+<style>
+body{font:16px system-ui;margin:0;background:#f3f6fa;color:#152638}main{max-width:1100px;margin:auto;padding:32px}section{background:white;border:1px solid #d7e1eb;border-radius:12px;padding:24px;margin:20px 0}h1{margin-bottom:8px}h2{font-size:20px}button,a{cursor:pointer}button{padding:10px 16px;border:1px solid #9badbf;border-radius:6px;background:#fff;margin:4px}button.primary{background:#1759a6;color:white}button:disabled{opacity:.5;cursor:not-allowed}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:480px;overflow:auto;background:#f5f7fa;padding:16px}label{display:block;margin:12px 0}textarea{width:100%;min-height:60px;box-sizing:border-box}input[type=file]{padding:12px;border:1px solid #9badbf;border-radius:6px}#status{white-space:pre-wrap;color:#8d260c}small{color:#4d6072}.item{border-top:1px solid #ddd;padding:14px 0}code{overflow-wrap:anywhere}</style></head>
+<body><main><h1>Add UX/UI info</h1><p>Prepare a proposal with your chat agent. Uploading never grants authority. Rendering stops at human UX review.</p>
+<p id="status" role="status"></p>
+<section><h2>1. Download project-bound authoring materials</h2>
+<button id="template">Download UX/UI template</button><button id="prompt">Download agent prompt</button><button id="export">Download requirements snapshot</button>
+<p>Use the current export; account for every answer and record by kind/category. Save a newly named Markdown file.</p></section>
+<section><h2>2. Upload a proposal</h2><input id="file" type="file" accept=".md"><button id="upload" class="primary">Upload completed UX/UI file</button>
+<p id="uploadResult" role="status"></p>
+<a id="reviewLink" href="#resolutionSection" hidden>Resolve grouped questions and view remaining blockers</a>
+<p>UTF-8, LF line endings, maximum 512 KiB. Reference attachment import is not yet supported. Declare NONE only when no references are needed; keep real references disclosed as blockers rather than removing them.</p>
+<pre id="preview" aria-label="Safe proposal text preview"></pre></section>
+<section id="resolutionSection"><h2>3. Resolve UX/UI questions</h2>
+<p>Choose explicit values for the grouped product and structural decisions below. Other records a specific answer; Undecided preserves the blocker. Saving changes the governed ArtPkg source snapshot, invalidates this uploaded draft and returns you to ArtPkg Intake for source review.</p>
+<div id="resolutionQuestions"></div>
+<button id="saveResolution" disabled class="primary">Save decisions and return to ArtPkg Intake</button>
+<p id="resolutionState" role="status"></p></section>
+<section id="reviewSection"><h2>4. Review exact sealed source and capability catalog</h2><p>After ArtPkg source review, upload a newly reconciled proposal. A genuine current ArtPkg seal is required for this step.</p>
+<p id="reviewState" role="status"></p>
+<p id="reviewNext"></p>
+<ul id="blockers" aria-label="Proposal blockers"></ul>
+<p id="reviewError" role="alert"></p>
+<button id="loadReview" disabled>Load exact review basis</button><pre id="basis"></pre><div id="decisions"></div>
+<label><input id="attest" type="checkbox"> I reviewed this exact source, selection, exclusions and capability catalog. This is not UX approval.</label>
+<button id="review" disabled aria-describedby="reviewState reviewNext reviewError">Approve selection and capability catalog only</button></section>
+<section><h2>5. Generate wireframe for human review</h2><button id="run" disabled class="primary">Emit strict input and render</button><button id="verify" disabled>Reverify receipt</button>
+<pre id="receipt"></pre><p>No UX approval or implementation authorization is issued here. The receipt identifies the verified local package for the separate human UX-review workflow.</p></section>
+</main><script>
+"use strict";
+const dir = new URLSearchParams(location.search).get("dir");
+let uploadId = null, reviewBasis = null;
+let reviewed = false, runAttempted = false, hasReceipt = false, busy = false;
+let proposalBlockers = [];
+let resolution = null;
+const exclusionFields = new Map(), typeFields = new Map();
+const resolutionFields = new Map();
+const $ = id => document.getElementById(id);
+function renderResolution(data){
+	resolution=data;resolutionFields.clear();$("resolutionQuestions").replaceChildren();
+	for(const question of data.questions){const field=document.createElement("fieldset");const legend=document.createElement("legend");legend.textContent=question.title+" — "+(question.scope==="SOURCE_AFFECTING"?"updates product source":"wireframe proposal only");field.append(legend);const prompt=document.createElement("p");prompt.textContent=question.prompt;field.append(prompt);const select=document.createElement("select");
+		for(const [value,labelText] of [["UNDECIDED","Undecided — keep blocked"],...Object.entries(question.choices),["OTHER","Other — enter a specific answer"]]){const option=document.createElement("option");option.value=value;option.textContent=labelText;option.selected=value===question.selected;select.append(option);}
+		const other=document.createElement("textarea");other.placeholder="Required only when Other is selected";other.value=question.other;other.hidden=select.value!=="OTHER";select.onchange=()=>{other.hidden=select.value!=="OTHER";};field.append(select,other);$("resolutionQuestions").append(field);resolutionFields.set(question.id,{select,other});}
+	$("resolutionState").textContent="Decide all six questions to close this grouped questionnaire. Undecided is allowed and remains explicit.";
+}
+function showReviewState(){
+	const blockers=reviewBasis?reviewBasis.normalized.blockers:proposalBlockers;
+	$("blockers").replaceChildren();
+	for(const blocker of blockers){const item=document.createElement("li");item.textContent=blocker;$("blockers").append(item);}
+	if(!dir){$("reviewState").textContent="Approval unavailable: no owned session.";$("reviewNext").textContent="Open this page from your questionnaire session.";}
+	else if(!uploadId){$("reviewState").textContent="Approval unavailable: no proposal uploaded.";$("reviewNext").textContent="Upload a proposal in step 2.";}
+	else if(reviewed){$("reviewState").textContent="Selection and capability catalog review recorded.";$("reviewNext").textContent="Wireframe generation is available in step 4 unless already attempted. This is not UX approval.";}
+	else if(blockers.length){$("reviewState").textContent="Upload accepted as a draft. Approval blocked by "+blockers.length+" reported items (not necessarily separate decisions).";$("reviewNext").textContent="Resolve the listed questions and authority issues with the requirements owner. After source changes, download a fresh requirements snapshot and reconcile a new proposal. Keep real restrictions disclosed; unsupported restrictions or references need implementation support. Upload the revised file, then load its exact review basis against a current ArtPkg seal. The checkbox cannot override blockers.";}
+	else if(!reviewBasis){$("reviewState").textContent="Approval unavailable: exact sealed-source review basis not loaded.";$("reviewNext").textContent="Select Load exact review basis. A genuine current ArtPkg seal and matching source revision are required; any failure will appear here. Upload acceptance alone does not verify source authority.";}
+	else{$("reviewState").textContent="Review basis loaded; no proposal-format blockers reported.";$("reviewNext").textContent="Review the source and catalog, provide each scoped exclusion reason and required type mapping below, then check the attestation and submit. Server validation still applies.";}
+}
+function enableActions(){
+	for(const id of ["template","prompt","export","upload"]) $(id).disabled=busy||!dir;
+	$("loadReview").disabled=busy||!dir||!uploadId||reviewed;
+	$("saveResolution").disabled=busy||!dir||!uploadId||!resolution||reviewed;
+	$("review").disabled=busy||!dir||!reviewBasis||reviewed||reviewBasis.normalized.blockers.length>0;
+	$("run").disabled=busy||!dir||!reviewed||runAttempted;
+	$("verify").disabled=busy||!dir||!hasReceipt;
+    showReviewState();
+}
+async function get(op) { const q = new URLSearchParams({dir,op}); if(uploadId) q.set("upload_id",uploadId); return request("/api/session/ux?"+q); }
+async function request(url,body) { const response=await fetch(url,body?{method:"POST",headers:{"Content-Type":"application/json","X-ArtPkg-UX":"1"},body:JSON.stringify({session_dir:dir,...body})}:{}); const data=await response.json(); if(!response.ok) throw Error(data.error||"Request failed"); return data; }
+function action(id,fn){ $(id).addEventListener("click",async()=>{if(busy||$(id).disabled)return;busy=true;enableActions();$("status").textContent="Working…";if(id==="loadReview"||id==="review"||id==="upload")$("reviewError").textContent="";if(id==="upload"){$("uploadResult").textContent="Uploading proposal…";$("reviewLink").hidden=true;}try{const message=await fn();$("status").textContent=message||"Done. No UX approval granted.";}catch(e){$("status").textContent=e.message;if(id==="upload")$("uploadResult").textContent="Upload failed: "+e.message;if(id==="loadReview"||id==="review")$("reviewError").textContent="Review blocked: "+e.message;}finally{busy=false;enableActions();} }); }
+function download(name,text){const a=document.createElement("a"),url=URL.createObjectURL(new Blob([text],{type:"text/plain;charset=utf-8"}));a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
+for(const op of ["template","prompt"]) action(op,async()=>{const d=await get(op);download(d.filename,d.content);});
+action("export",async()=>download("project-requirements-snapshot.json",JSON.stringify(await get("export"),null,2)));
+action("upload",async()=>{const f=$("file").files[0];if(!f||f.size>512*1024)throw Error("Select a Markdown file of at most 512 KiB");uploadId=null;reviewBasis=null;resolution=null;proposalBlockers=[];reviewed=false;runAttempted=false;hasReceipt=false;$("receipt").textContent="";$("preview").textContent="";$("basis").textContent="";$("decisions").replaceChildren();$("resolutionQuestions").replaceChildren();$("resolutionState").textContent="";exclusionFields.clear();typeFields.clear();resolutionFields.clear();$("attest").checked=false;const raw=new TextDecoder("utf-8",{fatal:true}).decode(await f.arrayBuffer());const d=await request("/api/session/ux-upload",{filename:f.name,markdown:raw});uploadId=d.upload_id;proposalBlockers=d.normalized.blockers;$("preview").textContent=d.preview;$("basis").textContent=JSON.stringify(d.normalized.blockers,null,2);renderResolution(await get("resolution"));
+const result=proposalBlockers.length
+	?"Uploaded "+f.name+" as a draft. Approval is blocked by "+proposalBlockers.length+" reported items. Resolve the grouped questions in step 3; uploading again will not resolve them."
+	:"Uploaded "+f.name+". No proposal-format blockers reported. Next: Load exact review basis in step 4 to verify the current sealed source. No approval granted.";
+$("uploadResult").textContent=result;$("reviewLink").hidden=false;return result;});
+action("saveResolution",async()=>{const decisions={};for(const [id,{select,other}] of resolutionFields)decisions[id]={choice:select.value,other:other.value};const result=await request("/api/session/ux-resolve",{upload_id:uploadId,decisions});$("resolutionState").textContent=result.status.complete?"All grouped decisions recorded. Returning to ArtPkg Intake for source review.":"Decisions recorded with unresolved choices. Returning to ArtPkg Intake; final review remains blocked.";(window.top||window).location.assign(result.return_url);return $("resolutionState").textContent;});
+action("loadReview",async()=>{reviewBasis=null;const d=await get("preview");reviewBasis=d;$("preview").textContent=d.preview;$("basis").textContent=JSON.stringify({basis_sha256:d.basis_sha256,basis:d.basis,normalized:d.normalized},null,2);$("decisions").replaceChildren();exclusionFields.clear();typeFields.clear();$("attest").checked=false;
+const rows=new Map(d.normalized.tables.scope.map(r=>[r[1]+"/"+r[0],r]));
+for(const item of d.basis.items){const row=rows.get(item.key);if(!row)continue;const div=document.createElement("div");div.className="item";const title=document.createElement("strong");title.textContent=item.key+" — "+row[6]+" — "+item.status;div.append(title);const text=document.createElement("p");text.textContent=item.text;div.append(text);
+if(row[6]==="EXCLUDE"){const label=document.createElement("label");label.textContent="Human scoped exclusion evidence/reason (NOT_APPLICABLE: prefix for that status). Explain why intended required scope does not need this item.";const input=document.createElement("textarea");label.append(input);div.append(label);exclusionFields.set(item.key,{input,item});}
+if(row[6]==="INCLUDE"&&!item.requirement_type){const label=document.createElement("label");label.textContent="Explicit requirement type mapping: ";const select=document.createElement("select");for(const value of ["","FUNCTIONAL","NON_FUNCTIONAL","CONSTRAINT"]){const option=document.createElement("option");option.value=value;option.textContent=value||"Choose reviewed type";select.append(option);}label.append(select);div.append(label);typeFields.set(item.key,select);}$("decisions").append(div);}
+$("review").disabled=d.normalized.blockers.length>0;});
+action("review",async()=>{if(!reviewBasis||!$("attest").checked)throw Error("Explicit human review attestation is required");const exclusions={},type_mappings={};for(const [key,{input,item}] of exclusionFields)exclusions[key]={item_sha256:item.item_sha256,reason:input.value};for(const [key,input] of typeFields)type_mappings[key]=input.value;const d=await request("/api/session/ux-review",{upload_id:uploadId,basis_sha256:reviewBasis.basis_sha256,attestation:reviewBasis.attestation,exclusions,type_mappings});$("receipt").textContent=JSON.stringify(d,null,2);reviewed=true;});
+action("run",async()=>{runAttempted=true;const d=await request("/api/session/ux-run",{upload_id:uploadId});$("receipt").textContent=JSON.stringify(d,null,2);hasReceipt=true;});
+action("verify",async()=>{$("receipt").textContent=JSON.stringify(await get("verify"),null,2);});
+if(!dir){$("status").textContent="Open Add UX/UI info from an owned questionnaire session.";document.querySelectorAll("button").forEach(b=>b.disabled=true);}
+enableActions();
+</script></body></html>

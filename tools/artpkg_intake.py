@@ -13,10 +13,16 @@ import artifacts_package_questionnaire as questionnaire
 REVIEW_QUEUES = (
     "needs_answer",
     "needs_confirmation",
+    "repeated_records_pending_review",
+    "current_blocking_decisions",
     "authority_sensitive",
     "evidence_sensitive",
     "ready_for_quick_review",
 )
+
+ARTPKG1_LATER_PREFIXES = ("ART-", "ENV-", "EVD-", "HAR-", "HND-", "VAL-")
+DISCOVERY_CONCEPT_ACTIVE_IDS = {"PKG-001", "PKG-002", "PKG-003", "PKG-004", "PKG-005", "PKG-007", "OVR-001", "OVR-002", "OVR-008", "BND-001", "BND-002", "SEC-001", "SEC-001-CATEGORIES", "QST-SET", "AUT-001", "FIN-001", "FIN-002", "FIN-003"}
+DISCOVERY_SUMMARY_IDS = {"PKG-001", "PKG-002", "PKG-005", "PKG-007", "OVR-001", "OVR-002", "OVR-008", "BND-001", "BND-002", "AUT-001"}
 
 AUTHORITY_PREFIXES = ("AUT-", "HAR-", "HND-", "FIN-")
 AUTHORITY_IDS = {"SEC-001", "SEC-001-CATEGORIES", "BND-001", "BND-002", "BND-005", "BND-006"}
@@ -225,14 +231,19 @@ def create_intake_session(pre_artifacts_path: str | Path, workspace: str | Path,
     seed = questionnaire.seed_from_pre_artifacts(str(stored_source))
     for qid, item in seed["answers"].items():
         questionnaire.set_answer(document, qid, item["value"], item["state"], "SOURCE_ARTIFACT", str(stored_source))
-        document["answers"][qid]["confidence_score"] = item["confidence_score"]
-        document["answers"][qid]["confidence_label"] = item["confidence_label"]
-        document["answers"][qid]["review_priority"] = item["review_priority"]
-        document["answers"][qid]["confidence_basis"] = item["confidence_basis"]
+        for metadata_key in (
+            "confidence_score", "confidence_label", "review_priority", "confidence_basis",
+            "source_status", "source_excerpt", "source_claim_statuses",
+        ):
+            if metadata_key in item:
+                document["answers"][qid][metadata_key] = item[metadata_key]
+        document["answers"][qid]["source_reference"] = item.get("source_reference", str(stored_source))
         document["answers"][qid]["review_disposition"] = "SEEDED_PENDING_REVIEW"
     created_records = questionnaire.merge_seed_records(document, seed)
+    question_plan = build_question_plan(document)
+    review_summary = build_review_summary(document)
     validation = questionnaire.validate_answers(document)
-    queues = build_review_queues(document, seed, validation)
+    queues = build_review_queues(document, seed, validation, question_plan)
 
     questionnaire.save_answers(document, str(session_dir / "answers.json"))
     _write_json(session_dir / "seed.json", seed)
@@ -249,14 +260,47 @@ def create_intake_session(pre_artifacts_path: str | Path, workspace: str | Path,
         "created_records": created_records,
         "validation": validation,
         "review_queues": queues,
+        "question_plan": question_plan,
+        "review_summary": review_summary,
         "document": document,
     }
+    session["human_work_counts"] = build_human_work_counts(session)
     save_intake_session(session)
     return session
 
 
 def _question_text(qid: str) -> str:
     return questionnaire.QUESTION_CATALOG.get(qid, {}).get("prompt", qid)
+
+
+def build_question_plan(document: dict[str, Any]) -> dict[str, Any]:
+    answers = document.get("answers", {})
+    concept = answers.get("PKG-002", {}).get("value") == "DISCOVERY" and answers.get("PKG-005", {}).get("value") == "NOT_CREATED"
+    if concept:
+        for qid, value, state, reason in (
+            ("AUT-001", "NONE", "PROVIDED", "ArtPkg 1 discovery profile"),
+            ("PKG-006", "NOT_APPLICABLE", "NOT_APPLICABLE", "Repository is NOT_CREATED"),
+        ):
+            current = answers.get(qid, {})
+            # Planning runs on every load. Replacing an unchanged answer would
+            # reset its timestamps/provenance and invalidate the final review.
+            if (current.get("value"), current.get("state")) != (value, state):
+                questionnaire.set_answer(document, qid, value, state, "DERIVED_BY_SCRIPT", reason)
+        questionnaire.apply_conditionals(document)
+    material = []; deferred = []; resolved = []
+    for record in document.get("records", {}).get("questions", []):
+        fields = record.get("fields", {}); needed = str(fields.get("needed_by", "")).lower(); question = str(fields.get("question", "")).lower()
+        if concept and any(stage in needed for stage in ("environment acceptance", "packaging phase")): deferred.append(record["id"])
+        elif concept and "implementation author" in question: resolved.append(record["id"])
+        elif record.get("id", "").startswith("Q-B") or fields.get("current_disposition") in {"OPEN", "BLOCKING"}: material.append(record["id"])
+    active = sorted(DISCOVERY_CONCEPT_ACTIVE_IDS if concept else questionnaire.QUESTION_CATALOG)
+    return {"profile": "DISCOVERY_CONCEPT_NOT_CREATED" if concept else "LIFECYCLE_DEFAULT", "active_question_ids": active, "review_summary_ids": sorted(DISCOVERY_SUMMARY_IDS if concept else ()), "routed_to_later_stages": sorted(qid for qid in questionnaire.QUESTION_CATALOG if qid.startswith(ARTPKG1_LATER_PREFIXES)), "material_decision_ids": material, "deferred_decision_ids": deferred, "resolved_by_authority_boundary": resolved, "implementation_authority": "NONE" if concept else answers.get("AUT-001", {}).get("value", "NOT_EVALUATED")}
+
+
+def build_review_summary(document: dict[str, Any]) -> dict[str, Any]:
+    def value(qid: str) -> Any: return document.get("answers", {}).get(qid, {}).get("value")
+    intent_review = document.get("attestation", {}).get("intent_summary_review")
+    return {"intent_summary": {"problem": value("OVR-001"), "observable_outcome": value("OVR-002"), "primary_user_or_use_case": [record.get("fields", {}) for record in document.get("records", {}).get("use_cases", [])[:3]], "in_scope": value("BND-001"), "out_of_scope": value("BND-002"), "important_limitations": value("PKG-009"), "actions": ["ACCEPT SUMMARY", "REVISE", "RETURN TO QUESTIONS"], "review": intent_review, "authority_effect": "Acceptance confirms represented intent only; it does not confirm every proposal or grant implementation authority."}, "record_sections": {section: {"count": len(records), "record_ids": [record["id"] for record in records]} for section, records in document.get("records", {}).items() if records}}
 
 
 def _question_prefix(qid: str) -> str:
@@ -331,14 +375,24 @@ def _source_context(qid: str, item: dict[str, Any]) -> dict[str, Any]:
     question = _question_context(qid)
     state = item.get("state", "UNKNOWN")
     value = item.get("value")
-    missing = state in {"UNKNOWN", "DEFERRED", "TO_BE_INSPECTED"} or value in {None, "", "UNKNOWN"}
-    summary = question["missing_summary"] if missing else "ArtPkg seeded this value from the uploaded artifact. Confirm it only if it is truthful for this package."
+    source_status = item.get("source_status")
+    if not source_status:
+        source_status = "ABSENT" if state == "UNKNOWN" or value in {None, "", "UNKNOWN"} else "PROVIDED_REVIEW_REQUIRED"
+    summaries = {
+        "ABSENT": question["missing_summary"],
+        "EXPLICIT_UNKNOWN": "The source explicitly marks this answer as UNKNOWN.",
+        "DEFERRED": "The source deliberately defers this answer; revisit it at the recorded phase or gate.",
+        "NOT_APPLICABLE": "ArtPkg classified this answer as not applicable from explicit package context.",
+        "CONFLICTED": "The source contains materially different candidate answers that require human resolution.",
+    }
+    summary = summaries.get(source_status, "ArtPkg found this candidate answer in the uploaded artifact. Accept, revise, mark unknown, defer, or reject it.")
     return {
         "answer_status": state,
-        "source_status": "missing_in_source" if missing else "seeded_from_source",
+        "source_status": source_status,
         "summary": summary,
         "source_type": item.get("source_type"),
         "source_reference": item.get("source_reference"),
+        "source_excerpt": item.get("source_excerpt"),
         "current_value": value,
     }
 
@@ -468,6 +522,11 @@ def _queue_item(qid: str, item: dict[str, Any], reason: str) -> dict[str, Any]:
         "review_priority": item.get("review_priority"),
         "source_type": item.get("source_type"),
         "source_reference": item.get("source_reference"),
+        "source_status": item.get("source_status"),
+        "source_excerpt": item.get("source_excerpt"),
+        "source_claim_statuses": item.get("source_claim_statuses", []),
+        "applicability": "NOT_APPLICABLE" if item.get("state") == "NOT_APPLICABLE" else "CURRENT",
+        "human_response_reason": reason,
         "reason": reason,
     }
 
@@ -480,21 +539,64 @@ def _is_evidence_sensitive(qid: str) -> bool:
     return qid.startswith(EVIDENCE_PREFIXES) or qid in EVIDENCE_IDS
 
 
-def build_review_queues(document: dict[str, Any], seed: dict[str, Any], validation: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def build_review_queues(document: dict[str, Any], seed: dict[str, Any], validation: dict[str, Any], question_plan: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
     queues: dict[str, list[dict[str, Any]]] = {name: [] for name in REVIEW_QUEUES}
     blocking_ids = set(validation.get("blocking_ids", []))
+    active_ids = set((question_plan or {}).get("active_question_ids", document.get("answers", {})))
+    summary_ids = set((question_plan or {}).get("review_summary_ids", []))
 
-    for qid in sorted(document.get("answers", {})):
-        item = document["answers"][qid]
-        state = item.get("state")
+    # A conditional followup (e.g. SEC-001-CATEGORIES, AUT-002..AUT-007-SCOPE) is popped
+    # from answers entirely once it becomes active again with no recoverable prior answer
+    # (see _restore_conditional_answer). Re-surface those by id instead of only iterating
+    # existing answer keys, so they are asked again instead of silently vanishing from
+    # every queue. Excludes REPEATED_RECORD sections (e.g. QST-SET), the harness subsystem
+    # (HAR-*), and final attestations (FIN-*), which each have their own review path.
+    answer_ids = set(document.get("answers", {}))
+    def _reintroduce_when_missing(qid: str) -> bool:
+        if qid.startswith(("HAR-", "FIN-")): return False
+        return questionnaire.QUESTION_CATALOG.get(qid, {}).get("type") != "REPEATED_RECORD"
+    review_ids = answer_ids | {qid for qid in active_ids if qid not in answer_ids and _reintroduce_when_missing(qid)}
+
+    for qid in sorted(review_ids):
+        if qid not in active_ids: continue
+        if qid in summary_ids: continue
+        item = document.get("answers", {}).get(qid, {})
+        state = item.get("state") or "UNKNOWN"
         score = item.get("confidence_score")
         disposition = item.get("review_disposition")
+        # A currently-suppressed conditional question (e.g. SEC-001-CATEGORIES while
+        # SEC-001 isn't YES) is not independently answerable; apply_conditionals will
+        # keep forcing it back to NOT_APPLICABLE, so don't offer it as an editable field.
+        if questionnaire.conditional_skip_reason(document, qid) is not None:
+            continue
 
         if disposition == "HUMAN_REJECTED":
             queues["needs_answer"].append(_queue_item(qid, item, "seeded answer was rejected and needs replacement"))
         else:
-            if state in {"UNKNOWN", "DEFERRED", "TO_BE_INSPECTED"} or qid in blocking_ids:
-                queues["needs_answer"].append(_queue_item(qid, item, "unresolved or blocking answer"))
+            source_status = item.get("source_status", "ABSENT" if state == "UNKNOWN" else "PROVIDED_REVIEW_REQUIRED")
+            if source_status == "CONFLICTED":
+                queues["needs_answer"].append(_queue_item(qid, item, "conflicting source answers require human resolution"))
+            elif state == "UNKNOWN":
+                if source_status == "EXPLICIT_UNKNOWN":
+                    reason = "source explicitly records UNKNOWN"
+                elif source_status == "REJECTED":
+                    reason = "source answer was explicitly rejected and needs replacement"
+                elif qid in blocking_ids:
+                    reason = "acceptance-blocking answer is absent"
+                elif item.get("review_priority") == "LOW":
+                    reason = "advisory answer is absent; it does not block the current gate"
+                else:
+                    reason = "required non-blocking answer is absent"
+                queues["needs_answer"].append(_queue_item(qid, item, reason))
+            elif state == "TO_BE_INSPECTED":
+                queues["needs_answer"].append(_queue_item(qid, item, "answer requires authorized source inspection"))
+            elif state == "DEFERRED":
+                if qid in blocking_ids:
+                    queues["needs_answer"].append(_queue_item(qid, item, "deferred answer is required at the current gate"))
+                else:
+                    queues["needs_confirmation"].append(_queue_item(qid, item, "answer is deferred until a later phase or gate"))
+            elif qid in blocking_ids:
+                queues["needs_confirmation"].append(_queue_item(qid, item, "seeded answer requires confirmation for the current gate"))
             elif disposition == "SEEDED_PENDING_REVIEW" and (score is None or score < 90):
                 queues["needs_confirmation"].append(_queue_item(qid, item, "seeded answer needs human confirmation"))
             elif disposition == "SEEDED_PENDING_REVIEW":
@@ -506,6 +608,9 @@ def build_review_queues(document: dict[str, Any], seed: dict[str, Any], validati
             queues["evidence_sensitive"].append(_queue_item(qid, item, "evidence, acceptance, validation, or negative-path field"))
 
     for section, records in sorted(document.get("records", {}).items()):
+        pending = [record for record in records if record.get("review_disposition") != "HUMAN_CONFIRMED"]
+        if pending and section != "questions":
+            queues["repeated_records_pending_review"].append({"kind": "record_section", "id": f"SECTION-{section}", "section": section, "label": section.replace("_", " ").title(), "count": len(pending), "record_ids": [record["id"] for record in pending], "records": pending, "record_context": _record_context(section), "record_schema": _record_schema(section), "reason": "seeded record section needs human review"})
         for record in records:
             disposition = record.get("review_disposition", "SEEDED_PENDING_REVIEW")
             review_item = {
@@ -528,12 +633,18 @@ def build_review_queues(document: dict[str, Any], seed: dict[str, Any], validati
             if disposition == "HUMAN_REJECTED":
                 review_item["reason"] = "seeded record was rejected and needs replacement"
                 queues["needs_answer"].append(review_item)
-            elif record.get("confidence_score", 0) < 90:
-                queues["needs_confirmation"].append(review_item)
-            else:
-                queues["ready_for_quick_review"].append(review_item)
+            elif record.get("source_status") in {"CONFLICTED", "REJECTED"} or section == "conflicts" or (section == "questions" and record["id"] in set((question_plan or {}).get("material_decision_ids", []))): queues["needs_confirmation"].append(review_item)
+
+    for qid in sorted(blocking_ids):
+        queues["current_blocking_decisions"].append({"kind": "attestation" if qid.startswith("FIN-") else "decision", "id": qid, "label": _question_text(qid)})
 
     return queues
+
+
+def build_human_work_counts(session: dict[str, Any]) -> dict[str, Any]:
+    queues = session.get("review_queues", {}); answers = session["document"].get("answers", {})
+    final_remaining = sum(answers.get(qid, {}).get("value") != "YES" for qid in ("FIN-001", "FIN-002", "FIN-003"))
+    return {"needs_human_answer": len(queues.get("needs_answer", [])), "needs_human_confirmation": len(queues.get("needs_confirmation", [])), "repeated_records_pending_review": len(queues.get("repeated_records_pending_review", [])), "current_blocking_decisions": len(queues.get("current_blocking_decisions", [])), "final_attestations_remaining": final_remaining, "deferred_to_later_phase": len(session.get("question_plan", {}).get("deferred_decision_ids", [])) + sum(item.get("state") == "DEFERRED" for item in answers.values()), "not_applicable": sum(item.get("state") == "NOT_APPLICABLE" for item in answers.values()), "suppressed": sum(item.get("state") == "NOT_APPLICABLE" and item.get("source_type") == "DERIVED_BY_SCRIPT" for item in answers.values()), "ready_to_seal": not session.get("validation", {}).get("blocking_ids") and final_remaining == 0}
 
 
 def save_intake_session(session: dict[str, Any]) -> None:
@@ -544,12 +655,23 @@ def save_intake_session(session: dict[str, Any]) -> None:
 
 
 def load_intake_session(session_dir: str | Path) -> dict[str, Any]:
-    root = Path(session_dir).expanduser().resolve()
+    from artpkg_source_commitment import safe
+    root = safe(Path(session_dir).expanduser())
+    # Check every internal input before any loader can read cross-owner bytes.
+    # Owner-checked callers hold the session lock; OS-level concurrent writers
+    # remain outside the trusted same-host application boundary.
+    for name in ("session.json", "answers.json", "seed.json"):
+        if not safe(root / name).is_file():
+            raise ValueError("session input must be a regular unlinked file: " + name)
     session = json.loads((root / "session.json").read_text(encoding="utf-8"))
     session["document"] = questionnaire.load_answers(str(root / "answers.json"))
     session["validation"] = questionnaire.validate_answers(session["document"])
     seed = json.loads((root / "seed.json").read_text(encoding="utf-8"))
-    session["review_queues"] = build_review_queues(session["document"], seed, session["validation"])
+    session["question_plan"] = build_question_plan(session["document"])
+    session["review_summary"] = build_review_summary(session["document"])
+    session["validation"] = questionnaire.validate_answers(session["document"])
+    session["review_queues"] = build_review_queues(session["document"], seed, session["validation"], session["question_plan"])
+    session["human_work_counts"] = build_human_work_counts(session)
     return session
 
 
@@ -581,6 +703,28 @@ def provide_answer(session: dict[str, Any], question_id: str, value: Any, review
     return item
 
 
+def provide_answers(session: dict[str, Any], answers: dict[str, tuple[Any, str]], reviewer: str) -> dict[str, dict[str, Any]]:
+    """Persist an explicit answer bundle as one session refresh."""
+    if not isinstance(answers, dict) or not answers:
+        raise ValueError("answer bundle must be a nonempty object")
+    updated = {}
+    for question_id, entry in answers.items():
+        value, state = entry
+        if state == "PROVIDED" and value in {"", None}:
+            raise ValueError("provided answers require a value")
+        questionnaire.set_answer(
+            session["document"], question_id, value, state,
+            "HUMAN_DECLARATION", "ArtPkg UX resolution questionnaire",
+        )
+        item = session["document"]["answers"][question_id]
+        item["review_disposition"] = "HUMAN_CONFIRMED"
+        item["reviewer"] = reviewer
+        item["last_edit_timestamp"] = now()
+        updated[question_id] = item
+    _refresh_session(session)
+    return updated
+
+
 def reject_seeded_answer(session: dict[str, Any], question_id: str, reason: str, reviewer: str) -> dict[str, Any]:
     item = session["document"]["answers"][question_id]
     item["review_disposition"] = "HUMAN_REJECTED"
@@ -600,6 +744,82 @@ def confirm_record(session: dict[str, Any], record_id: str, reviewer: str) -> di
     return record
 
 
+def confirm_record_section(session: dict[str, Any], section: str, reviewer: str) -> list[dict[str, Any]]:
+    records = session["document"].get("records", {}).get(section)
+    if records is None: raise KeyError(section)
+    stamp = now()
+    for record in records:
+        record["review_disposition"] = "HUMAN_CONFIRMED"
+        record["reviewer"] = reviewer
+        record["last_edit"] = stamp
+        record["section_confirmation"] = {"reviewer": reviewer, "timestamp": stamp, "scope": section, "preserved_source_status": record.get("fields", {}).get("source_status")}
+    _refresh_session(session)
+    return records
+
+
+# Category -> the RECORD_FIELDS field name holding its lifecycle status.
+# Deliberately the same category set tools/artpkg_requirement_approval.py's
+# RECORD_STATUS_FIELDS reads as an approval signal -- keep both in sync; that
+# module treats exactly this field as the trustworthy alternative to
+# review_disposition (which advance_record_status below never touches).
+STATUS_ADVANCEABLE_CATEGORIES = {
+    "functional_requirements": "status",
+    "non_functional_requirements": "status",
+    "acceptance_criteria": "status",
+    "decisions": "status",
+    "assumptions": "status",
+    "conflicts": "status",
+    "risks": "residual_status",
+    "phases": "status",
+}
+
+
+def advance_record_status(session: dict[str, Any], record_id: str, target_status: str, reviewer: str) -> dict[str, Any]:
+    """Explicitly set a record's own lifecycle status field, one record at a time.
+
+    No bulk/section form exists on purpose: unlike confirm_record_section's
+    review_disposition stamp (deliberately a blanket "I looked at this batch"
+    gesture), this field is the one downstream consumers treat as evidence a
+    specific item actually progressed -- a bulk version here would recreate
+    the exact false-confidence problem that field-level review_disposition
+    already has.
+    """
+    document = session["document"]
+    category, record = None, None
+    for section, records in document.get("records", {}).items():
+        for candidate in records:
+            if candidate["id"] == record_id:
+                category, record = section, candidate
+                break
+        if record is not None:
+            break
+    if record is None:
+        raise KeyError(record_id)
+    field_name = STATUS_ADVANCEABLE_CATEGORIES.get(category)
+    if field_name is None:
+        raise ValueError(f"{category} records have no advanceable status field")
+    allowed = next(options for name, _, options in questionnaire.RECORD_FIELDS[category] if name == field_name)
+    if target_status not in allowed:
+        raise ValueError(f"{target_status!r} is not a valid {field_name} for {category}: {sorted(allowed)}")
+    fields = record.setdefault("fields", {})
+    previous = fields.get(field_name)
+    fields[field_name] = target_status
+    record.setdefault("status_history", []).append(
+        {"field": field_name, "from": previous, "to": target_status, "reviewer": reviewer, "timestamp": now()}
+    )
+    record["last_edit"] = now()
+    _refresh_session(session)
+    return record
+
+
+def review_intent_summary(session: dict[str, Any], action: str, reviewer: str) -> dict[str, Any]:
+    if action not in {"ACCEPT SUMMARY", "REVISE", "RETURN TO QUESTIONS"}: raise ValueError("invalid intent summary action")
+    review = {"action": action, "reviewer": reviewer, "timestamp": now(), "authority_effect": "NONE"}
+    session["document"].setdefault("attestation", {})["intent_summary_review"] = review
+    _refresh_session(session)
+    return review
+
+
 def reject_seeded_record(session: dict[str, Any], record_id: str, reason: str, reviewer: str) -> dict[str, Any]:
     record = questionnaire.find_record(session["document"], record_id)
     record["review_disposition"] = "HUMAN_REJECTED"
@@ -612,8 +832,12 @@ def reject_seeded_record(session: dict[str, Any], record_id: str, reason: str, r
 
 def _refresh_session(session: dict[str, Any]) -> None:
     session_dir = Path(session["session_dir"])
-    questionnaire.save_answers(session["document"], str(session_dir / "answers.json"))
     seed = json.loads((session_dir / "seed.json").read_text(encoding="utf-8"))
+    session["question_plan"] = build_question_plan(session["document"])
+    # Persist any genuine profile normalization before publishing its summary.
+    questionnaire.save_answers(session["document"], str(session_dir / "answers.json"))
+    session["review_summary"] = build_review_summary(session["document"])
     session["validation"] = questionnaire.validate_answers(session["document"])
-    session["review_queues"] = build_review_queues(session["document"], seed, session["validation"])
+    session["review_queues"] = build_review_queues(session["document"], seed, session["validation"], session["question_plan"])
+    session["human_work_counts"] = build_human_work_counts(session)
     save_intake_session(session)

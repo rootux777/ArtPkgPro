@@ -11,6 +11,35 @@ import artpkg_archify_runner as runner
 
 
 class ArchifyRunnerTests(unittest.TestCase):
+    def test_missing_node_reports_node_configuration_not_archify_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = runner.ArchifyConfig(archify_root=temp_dir, receipt_dir=temp_dir)
+            with patch(
+                "artpkg_archify_runner.subprocess.run",
+                side_effect=FileNotFoundError(2, "No such file or directory", "node"),
+            ):
+                result = runner.run_archify_validate(config, "architecture", "input.json")
+
+            persisted = json.loads(Path(result["receipt_path"]).read_text(encoding="utf-8"))
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("ARCHIFY_INVOCATION_FAILED", result["exit_code"])
+        self.assertIn("ARTPKG_NODE", result["receipt"]["error"])
+        self.assertIn("PATH", result["receipt"]["error"])
+        self.assertNotIn("ARTPKG_ARCHIFY_ROOT", result["receipt"]["error"])
+        self.assertEqual(result["receipt"], persisted["receipt"])
+
+    def test_missing_checkout_reports_archify_root_configuration(self):
+        config = runner.ArchifyConfig(archify_root="/missing/archify")
+        with patch(
+            "artpkg_archify_runner.subprocess.run",
+            side_effect=FileNotFoundError(2, "No such file or directory", config.archify_root),
+        ):
+            result = runner.run_archify_validate(config, "architecture", "input.json")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("ARTPKG_ARCHIFY_ROOT", result["receipt"]["error"])
+
     def test_missing_archify_root_returns_actionable_receipt_without_invoking_node(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             artifact = Path(temp_dir) / "input.json"

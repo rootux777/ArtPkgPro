@@ -16,7 +16,7 @@ services:
     cap_drop:
       - ALL
     privileged: false
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "artpkg", "healthcheck", "--host", "127.0.0.1", "--port", "8080"]
       interval: 30s

@@ -1,2 +1,8 @@
-# Required by tools/artpkg_v03.py for Draft 2020-12 JSON Schema validation.
+# Required by tools/artpkg_v03.py for Draft 2020-12 JSON Schema validation, and
+# transitively by tools/artpkg_ux_preparation.py's runtime(), which imports the
+# external ux_harness package (/home/rootux/UXPkg, pinned to jsonschema==4.23.0
+# in its own pyproject.toml) onto this interpreter's sys.path. Must be installed
+# into whichever interpreter actually runs tools/artpkg_intake_server.py, not
+# just this repo's .venv -- start_intake.sh invokes bare `python`, which may
+# resolve to a different interpreter (e.g. a pyenv version) than .venv.
 jsonschema>=4.18,<5

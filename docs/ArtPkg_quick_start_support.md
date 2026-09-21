@@ -102,13 +102,14 @@ Start the intake server bound to all host interfaces for LAN access:
 
 ```sh
 export ARTPKG_INTAKE_CREDENTIALS_FILE=./artpkg-credentials.json
+export ARTPKG_ARCHIFY_ROOT=/home/rootux/Downloads/archifypro/archify
 python tools/artpkg_intake_server.py --workspace . --host 0.0.0.0 --port 8765
 ```
 
 Or as a one-liner:
 
 ```sh
-ARTPKG_INTAKE_CREDENTIALS_FILE=./artpkg-credentials.json python tools/artpkg_intake_server.py --workspace . --host 0.0.0.0 --port 8765
+ARTPKG_INTAKE_CREDENTIALS_FILE=./artpkg-credentials.json ARTPKG_ARCHIFY_ROOT=/home/rootux/Downloads/archifypro/archify python tools/artpkg_intake_server.py --workspace . --host 0.0.0.0 --port 8765
 ```
 
 Expected output:
@@ -149,7 +150,56 @@ To stop the intake UI, press `Ctrl+C` in the terminal running it, or find and st
 pkill -f artpkg_intake_server.py
 ```
 
-## 4. One-Shot "Is Everything Up" Check
+## 4. Operational Verification
+
+Run the standard verifier from the ArtPkg workspace:
+
+```sh
+python tools/artpkg_operational_check.py
+```
+
+The default deep check verifies:
+
+- the ArtPkg status service returns its exact read-only `/healthz` payload;
+- the Archify viewer returns non-empty HTTP 200 content;
+- the intake UI rejects unauthenticated access and accepts configured Basic Auth;
+- the calculator regression fixture can create a new questionnaire session;
+- Archify validation and HTML delivery succeed;
+- the generated projection HTML is authenticated, fetchable, and non-empty.
+
+Expected summary:
+
+```text
+ArtPkg operational check: PASS (... passed, ... warnings, 0 failed)
+```
+
+The optional browser visual check is reported as `WARN` when Chrome or Chromium is unavailable. Validation, delivery, or HTML-fetch failures are `FAIL`. The process exits `0` when operational and `1` when any required check fails.
+
+Deep mode creates a probe session under `.artpkg/users/{username}/sessions/` using the regression fixture. For frequent non-mutating availability checks, use shallow mode:
+
+```sh
+python tools/artpkg_operational_check.py --shallow
+```
+
+For another local service or monitoring process, request machine-readable output and use the exit code:
+
+```sh
+python tools/artpkg_operational_check.py --json
+```
+
+Credentials are read from `artpkg-credentials.json` by default. Select another configured user with `--username`, another credentials file with `--credentials-file`, or provide the password through the `ARTPKG_OPERATIONAL_PASSWORD` environment variable. Passwords are never printed.
+
+Endpoints and the smoke fixture are configurable, which allows this script to serve as a reference implementation for similar local applications:
+
+```sh
+python tools/artpkg_operational_check.py \
+  --status-url http://127.0.0.1:8555/healthz \
+  --viewer-url http://127.0.0.1:8666/ \
+  --intake-url http://127.0.0.1:8765 \
+  --fixture tests/fixtures/basic-windows-calculator_preartifacts.md
+```
+
+### Manual fallback
 
 ```sh
 echo "-- ArtPkg container --"
@@ -170,6 +220,8 @@ curl -s -m 3 -u tester1:secret1 -o /dev/null -w 'HTTP %{http_code}\n' http://192
 - **`curl` to `8555`/`8666` times out** → container isn't running; check with `docker ps`, then `docker compose -f compose.portainer.yml up -d`.
 - **Intake UI returns 401 Unauthorized** → credentials not provided. Use `curl -u tester1:secret1 http://127.0.0.1:8765/` to authenticate.
 - **Server exits with "No credentials configured"** → credentials file not found or `ARTPKG_INTAKE_CREDENTIALS_FILE` not set. Verify file exists and path is correct.
+- **Visualization reports that Archify is not configured** → set `ARTPKG_ARCHIFY_ROOT=/home/rootux/Downloads/archifypro/archify`, verify `bin/archify.mjs` exists there, and restart the intake server.
+- **Visualization fails with `No such file or directory: 'node'`** → Node is missing from the intake server's `PATH`, not necessarily from the machine. Set `ARTPKG_NODE` to the absolute executable path reported by `command -v node`. For systemd, add `Environment=ARTPKG_NODE=/absolute/path/to/node` under `[Service]` in a service override, reload systemd, and restart `artpkg-intake.service`. Systemd does not load your shell's NVM configuration; update the override if that Node version is removed.
 - **LAN clients cannot connect to port 8765** → confirm the server was started with `--host 0.0.0.0`, then check the host firewall permits TCP port `8765` from the trusted LAN only.
 - **Each user must authenticate separately** → each session is isolated per user in `.artpkg/users/{username}/sessions/`. Users cannot access each other's sessions.
 - **`docker ps` shows nothing at all** → confirm you're using `sudo docker ps` (rootless vs. root Docker context can differ per user).

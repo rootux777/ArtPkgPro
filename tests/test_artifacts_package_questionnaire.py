@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import subprocess
@@ -228,6 +229,19 @@ class QuestionnaireTests(unittest.TestCase):
         self.assertIn("requirement", seeded["records"]["functional_requirements"][0]["fields"])
         self.assertIn("risk", seeded["records"]["risks"][0]["fields"])
 
+    def test_markdown_table_rejects_ambiguous_row_shape_with_location(self):
+        malformed = (
+            "| Requirement ID | Requirement | Status |\n"
+            "| --- | --- | --- |\n"
+            "| FR-001 | Missing status cell |\n"
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"Section 7 functional requirements: row 1 has 2 cells; expected 3",
+        ):
+            q._parse_markdown_table(malformed, "Section 7 functional requirements")
+
     def test_seed_summary_prioritizes_low_confidence_items_first(self):
         seeded = {
             "source_path": "example.md",
@@ -357,6 +371,114 @@ class QuestionnaireTests(unittest.TestCase):
             self.assertEqual("UNKNOWN", seeded["answers"][qid]["state"])
         self.assertNotIn("AUT-002", seeded["answers"])
         self.assertNotIn("AUT-004", seeded["answers"])
+
+    def test_source_candidates_distinguish_states_claim_status_and_conflicts(self):
+        text = (
+            "## Problem\nA usable source answer.\n\n"
+            "## Explicit knowledge\n`UNKNOWN`\n\n"
+            "## Later decision\n`DEFERRED`\n\n"
+            "## Applicability\n`NOT_APPLICABLE`\n\n"
+            "## Proposal\n`[PROPOSED]` A candidate requiring review.\n\n"
+            "## Rejected answer\n`REJECTED`\n\n"
+            "## Duplicate field\nFirst value.\n\n"
+            "## Duplicate field\nSecond value.\n"
+        )
+        index = q._markdown_source_index(text)
+
+        self.assertEqual("PROVIDED", q._candidate_from_index(index, ("Problem",))["state"])
+        self.assertEqual("EXPLICIT_UNKNOWN", q._candidate_from_index(index, ("Explicit knowledge",))["source_status"])
+        self.assertEqual("DEFERRED", q._candidate_from_index(index, ("Later decision",))["state"])
+        self.assertEqual("NOT_APPLICABLE", q._candidate_from_index(index, ("Applicability",))["state"])
+        self.assertIn("PROPOSED", q._candidate_from_index(index, ("Proposal",))["source_claim_statuses"])
+        self.assertEqual("REJECTED", q._candidate_from_index(index, ("Rejected answer",))["source_status"])
+        conflict = q._candidate_from_index(index, ("Duplicate field",))
+        self.assertEqual("CONFLICTED", conflict["source_status"])
+        self.assertEqual("UNKNOWN", conflict["state"])
+        self.assertEqual(2, conflict["source_reference"].count("Duplicate field (line"))
+        self.assertIn("First value", conflict["source_excerpt"])
+        self.assertIn("Second value", conflict["source_excerpt"])
+        self.assertIsNone(q._candidate_from_index(index, ("Absent field",)))
+
+    def test_concept_package_derives_reviewable_work_state_and_non_applicable_snapshot(self):
+        source = self.root / "concept.md"
+        source.write_text(
+            "# Concept package\n\n"
+            "## Package control\n"
+            "| Field | Value |\n| --- | --- |\n"
+            "| Project | New application |\n"
+            "| Project maturity | DISCUSSED_CONCEPT |\n"
+            "| Repository or workspace | NOT_CREATED |\n",
+            encoding="utf-8",
+        )
+
+        seeded = q.seed_from_pre_artifacts(str(source))
+
+        self.assertEqual("NOT_APPLICABLE", seeded["answers"]["PKG-006"]["state"])
+        for qid in ("OVR-003", "OVR-004"):
+            self.assertEqual("PROVIDED", seeded["answers"][qid]["state"])
+            self.assertEqual("PROVIDED_REVIEW_REQUIRED", seeded["answers"][qid]["source_status"])
+            self.assertEqual(["INFERRED"], seeded["answers"][qid]["source_claim_statuses"])
+
+    def test_existing_repository_without_snapshot_remains_unresolved(self):
+        source = self.root / "existing.md"
+        source.write_text(
+            "# Existing application\n\n"
+            "## Package control\n"
+            "| Field | Value |\n| --- | --- |\n"
+            "| Project | Existing application |\n"
+            "| Repository or workspace | https://example.invalid/repository.git |\n",
+            encoding="utf-8",
+        )
+
+        seeded = q.seed_from_pre_artifacts(str(source))
+
+        self.assertEqual("PROVIDED", seeded["answers"]["PKG-005"]["state"])
+        self.assertEqual("UNKNOWN", seeded["answers"]["PKG-006"]["state"])
+        self.assertEqual("ABSENT", seeded["answers"]["PKG-006"]["source_status"])
+
+    def test_source_aware_aliases_match_supported_pre_artifacts_vocabulary(self):
+        source = self.root / "supported-vocabulary.md"
+        source.write_text(
+            "# Pre-Artifacts Package\n\n"
+            "## 0. Document control\n"
+            "| Field | Value |\n| --- | --- |\n"
+            "| Working project name | Example |\n"
+            "| Prepared for | User / test operator |\n"
+            "| Prepared by | Source preparation agent |\n"
+            "| Target repository/workspace | NOT_CREATED |\n\n"
+            "## 1. Executive summary\n\n"
+            "### What the user wants to build\nA new local application for an agreed purpose.\n\n"
+            "### Current maturity\n`DISCUSSED_CONCEPT`\n\nNo repository or implementation has been provided.\n\n"
+            "### Recommended first bounded outcome\nApprove a minimal behavioral specification.\n\n"
+            "## 2. Origin and evidence boundary\n\n"
+            "### What was not inspected or verified\nNo implementation, repository, executable, or runtime behavior was inspected.\n",
+            encoding="utf-8",
+        )
+
+        seeded = q.seed_from_pre_artifacts(str(source))
+
+        for qid in ("PKG-004", "PKG-008", "OVR-003", "OVR-004", "OVR-007", "OVR-008"):
+            self.assertEqual("PROVIDED", seeded["answers"][qid]["state"], qid)
+            self.assertEqual("PROVIDED_REVIEW_REQUIRED", seeded["answers"][qid]["source_status"], qid)
+        self.assertIn("User / test operator", seeded["answers"]["PKG-004"]["value"])
+        self.assertIn("Source preparation agent", seeded["answers"]["PKG-004"]["value"])
+
+    def test_calculator_source_answers_are_seeded_with_provenance_without_authority_upgrade(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        seeded = q.seed_from_pre_artifacts(str(source))
+        provided_ids = {
+            "OVR-001", "OVR-002", "OVR-005", "OVR-007", "OVR-008",
+            "PKG-001", "PKG-005", "PKG-008", "PKG-009",
+        }
+
+        for qid in provided_ids:
+            item = seeded["answers"][qid]
+            self.assertEqual("PROVIDED", item["state"], qid)
+            self.assertEqual("PROVIDED_REVIEW_REQUIRED", item["source_status"], qid)
+            self.assertIn(str(source), item["source_reference"], qid)
+            self.assertTrue(item["source_excerpt"], qid)
+        self.assertEqual("NOT_APPLICABLE", seeded["answers"]["PKG-006"]["state"])
+        self.assertEqual("NOT_EVALUATED", seeded["answers"]["AUT-001"]["value"])
 
     def test_pre_artifacts_seed_does_not_fabricate_authority_when_none_claimed(self):
         sample_path = self.root / "pre_artifacts_authority.md"
@@ -556,6 +678,18 @@ class QuestionnaireTests(unittest.TestCase):
         self.assertIn(record_id, result["blocking_ids"])
         self.assertTrue(any("FR-999" in error for error in result["errors"]))
 
+    def test_imported_reference_lists_and_ranges_are_validated_individually(self):
+        for number in range(1, 4):
+            q.add_record(self.document, "functional_requirements", {
+                "requirement": f"Requirement {number}", "source": "source", "status": "PROPOSED",
+            }, record_id=f"FR-{number:03d}")
+        criterion = q.add_record(self.document, "acceptance_criteria", {
+            "status": "PROPOSED", "requirement_ids": "FR-001–FR-003, OUT-004, MET-005",
+        })
+        result = q.validate_answers(self.document)
+        self.assertNotIn(criterion, result["blocking_ids"])
+        self.assertFalse(any(f"{criterion}: invalid cross-reference" in error for error in result["errors"]))
+
     def test_gate_report_has_explanations_and_ids(self):
         q.set_answer(self.document, "OVR-001", "problem")
         q.set_answer(self.document, "BND-001", "inside")
@@ -640,6 +774,151 @@ class QuestionnaireTests(unittest.TestCase):
         q.set_harness_mode(self.document, True)
         self.assertEqual("YES", self.document["answers"]["HAR-000"]["value"])
         self.assertNotIn("HAR-001", self.document["answers"])
+
+    def _conditional_cases(self):
+        return (
+            ("AUT-001", "DISCOVERY_ONLY", "NONE", ("AUT-002", "AUT-003", "AUT-004", "AUT-005", "AUT-006", "AUT-007-SCOPE")),
+            ("PKG-002", "CROSS_PROJECT_TRANSFER", "DISCOVERY", ("XFR-SET",)),
+            ("SEC-001", "YES", "NO", ("SEC-001-CATEGORIES",)),
+            ("HAR-000", True, False, tuple(qid for qid in q.HARNESS_QUESTION_IDS if qid != "HAR-000")),
+        )
+
+    def _set_conditional_controller(self, document, controller, value):
+        if controller == "HAR-000":
+            q.set_harness_mode(document, value)
+        else:
+            q.set_answer(document, controller, value)
+
+    def test_conditional_suppression_round_trip_preserves_answers_and_metadata(self):
+        for controller, active, inactive, question_ids in self._conditional_cases():
+            for source in sorted(q.PROVENANCE - {"DERIVED_BY_SCRIPT"}):
+                with self.subTest(controller=controller, source=source):
+                    document = q.new_answers(str(self.template), str(self.root), "Synthetic respondent")
+                    self._set_conditional_controller(document, controller, active)
+                    for qid in question_ids:
+                        value = sorted(q.ENUM_CHOICES[qid])[0] if qid in q.ENUM_CHOICES else f"Synthetic {qid}"
+                        q.set_answer(document, qid, value, source_type=source, source_reference="synthetic-source")
+                        document["answers"][qid].update({
+                            "reviewer": "Synthetic reviewer",
+                            "review_disposition": "HUMAN_CONFIRMED" if source == "HUMAN_DECLARATION" else "SEEDED_PENDING_REVIEW",
+                            "review_disposition_timestamp": "2026-01-01T00:00:00+00:00",
+                            "confidence_score": 85,
+                            "source_excerpt": {"lines": ["Synthetic evidence"]},
+                        })
+                    originals = {qid: copy.deepcopy(document["answers"][qid]) for qid in question_ids}
+                    q.apply_conditionals(document)
+                    self.assertEqual(originals, {qid: document["answers"][qid] for qid in question_ids})
+
+                    for cycle in range(2):
+                        self._set_conditional_controller(document, controller, inactive)
+                        for qid in question_ids:
+                            item = document["answers"][qid]
+                            self.assertEqual((None, "NOT_APPLICABLE", "DERIVED_BY_SCRIPT"), (item["value"], item["state"], item["source_type"]))
+                            history = [entry for entry in document["answer_history"] if entry["question_id"] == qid and entry.get("conditional_suppression")]
+                            self.assertEqual(cycle + 1, len(history))
+                            self.assertEqual(originals[qid], history[-1]["previous"])
+                            self.assertIn("timestamp", history[-1])
+                        suppressed = copy.deepcopy(document)
+                        q.apply_conditionals(document)
+                        q.apply_conditionals(document)
+                        self.assertEqual(suppressed, document)
+                        path = self.root / "conditional-answers.json"
+                        q.save_answers(document, str(path))
+                        document = q.load_answers(str(path))
+                        self.assertEqual(suppressed, document)
+                        self._set_conditional_controller(document, controller, active)
+                        self.assertEqual(originals, {qid: document["answers"][qid] for qid in question_ids})
+                        restored = copy.deepcopy(document)
+                        q.apply_conditionals(document)
+                        self.assertEqual(restored, document)
+                        q.save_answers(document, str(path))
+                        document = q.load_answers(str(path))
+                        self.assertEqual(restored, document)
+
+    def test_conditional_suppression_restores_latest_not_newer_explicit_replacement(self):
+        for controller, active, inactive, question_ids in self._conditional_cases():
+            for suppress_replacement in (False, True):
+                for state in sorted(q.STATES):
+                    with self.subTest(controller=controller, suppress_replacement=suppress_replacement, state=state):
+                        document = copy.deepcopy(self.document)
+                        qid = question_ids[-1]
+                        self._set_conditional_controller(document, controller, active)
+                        q.set_answer(document, qid, "Old explicit answer")
+                        self._set_conditional_controller(document, controller, inactive)
+                        # A replacement entered while inactive wins, even if its
+                        # state/value match the derived NOT_APPLICABLE placeholder.
+                        value = "New explicit answer" if state == "PROVIDED" else None
+                        q.set_answer(document, qid, value, state, source_reference="new-source")
+                        document["answers"][qid]["reviewer"] = "New reviewer"
+                        replacement = copy.deepcopy(document["answers"][qid])
+                        if suppress_replacement:
+                            q.apply_conditionals(document)
+                            self.assertEqual("DERIVED_BY_SCRIPT", document["answers"][qid]["source_type"])
+                        path = self.root / "replacement.json"
+                        q.save_answers(document, str(path))
+                        document = q.load_answers(str(path))
+                        self._set_conditional_controller(document, controller, active)
+                        self.assertEqual(replacement, document["answers"][qid])
+
+    def test_conditional_suppression_does_not_search_past_newer_history(self):
+        for controller, active, inactive, question_ids in self._conditional_cases():
+            with self.subTest(controller=controller):
+                document = copy.deepcopy(self.document)
+                qid = question_ids[-1]
+                self._set_conditional_controller(document, controller, active)
+                q.set_answer(document, qid, "Old explicit answer")
+                self._set_conditional_controller(document, controller, inactive)
+                reason = document["answers"][qid]["source_reference"]
+                q.set_answer(document, qid, "New explicit answer")
+                q.set_answer(document, qid, None, "NOT_APPLICABLE", "DERIVED_BY_SCRIPT", reason)
+                self._set_conditional_controller(document, controller, active)
+                self.assertNotIn(qid, document["answers"])
+
+    def test_conditional_suppression_without_archive_requires_answer_on_activation(self):
+        for controller, active, inactive, question_ids in self._conditional_cases():
+            with self.subTest(controller=controller):
+                document = copy.deepcopy(self.document)
+                self._set_conditional_controller(document, controller, inactive)
+                history = copy.deepcopy(document["answer_history"])
+                q.apply_conditionals(document)
+                self.assertEqual(history, document["answer_history"])
+                self._set_conditional_controller(document, controller, active)
+                for qid in question_ids:
+                    self.assertNotIn(qid, document["answers"])
+                    self.assertTrue(q.should_ask_question(document, qid))
+
+    def test_conditional_suppression_preserves_initially_inactive_authority_answers(self):
+        for authority in (None, "NONE", "NOT_EVALUATED"):
+            with self.subTest(authority=authority):
+                document = copy.deepcopy(self.document)
+                if authority is not None:
+                    q.set_answer(document, "AUT-001", authority)
+                q.set_answer(document, "AUT-004", "Synthetic bounded scope")
+                original = copy.deepcopy(document["answers"]["AUT-004"])
+                q.apply_conditionals(document)
+                self.assertEqual("NOT_APPLICABLE", document["answers"]["AUT-004"]["state"])
+                q.set_answer(document, "AUT-001", "IMPLEMENTATION_WITHIN_EXACT_SCOPE")
+                self.assertEqual(original, document["answers"]["AUT-004"])
+
+    def test_conditional_suppression_history_is_independent_and_schema_compatible(self):
+        from jsonschema import Draft202012Validator
+
+        q.set_answer(self.document, "SEC-001", "YES")
+        q.set_answer(self.document, "SEC-001-CATEGORIES", ["Synthetic category"])
+        original = self.document["answers"]["SEC-001-CATEGORIES"]
+        expected = copy.deepcopy(original)
+        q.set_answer(self.document, "SEC-001", "NO")
+        archived = [entry for entry in self.document["answer_history"] if entry.get("conditional_suppression")][-1]
+        original["value"].append("External mutation")
+        self.assertEqual(expected, archived["previous"])
+        schema_path = Path(__file__).parents[1] / "schemas" / "artifacts_package_answers_v0.2.schema.json"
+        validator = Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+        q.validate_document_shape(self.document)
+        validator.validate(self.document)
+        q.set_answer(self.document, "SEC-001", "YES")
+        self.document["answers"]["SEC-001-CATEGORIES"]["value"].append("Restored mutation")
+        self.assertEqual(expected, archived["previous"])
+        validator.validate(self.document)
 
     def test_v01_migrates_without_losing_records(self):
         legacy = q.new_answers(str(self.template), str(self.root))

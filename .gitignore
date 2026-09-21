@@ -21,3 +21,8 @@ artifacts_package_validation.md
 credentials.json
 .credentials.json
 artpkg-credentials.json
+
+# Independent seal commitments and UX custody are private even outside .artpkg.
+.artpkg-source-custody/
+.ux-preparation-custody/
+.ux-render-custody/

@@ -198,11 +198,31 @@ def _mapping_for(session: dict[str, Any], ir: dict[str, Any]) -> dict[str, Any]:
 
 def _artpkg_review_action(component_id: str, session: dict[str, Any], aggregation: dict[str, Any] | None, answer_ids: list[str]) -> dict[str, Any]:
     queue_counts = {name: len(items) for name, items in session.get("review_queues", {}).items()}
+    queues = session.get("review_queues", {})
+
+    def review_target(queue_names: tuple[str, ...], prefixes: tuple[str, ...] = ()) -> tuple[str, str]:
+        for queue_name in queue_names:
+            items = queues.get(queue_name, [])
+            candidates = [item for item in items if not prefixes or str(item.get("id", "")).startswith(prefixes)]
+            if candidates:
+                return queue_name, str(candidates[0]["id"])
+        return queue_names[0], ""
+
+    review_queue, review_focus = review_target(("needs_answer", "needs_confirmation", "ready_for_quick_review"))
+    acceptance_queue, acceptance_focus = review_target(
+        ("repeated_records_pending_review", "needs_answer", "needs_confirmation", "evidence_sensitive", "ready_for_quick_review"),
+        ("AC-",),
+    )
+    acceptance_section = next((item for item in queues.get("repeated_records_pending_review", []) if item.get("section") == "acceptance_criteria"), None)
+    if acceptance_section:
+        acceptance_queue, acceptance_focus = "repeated_records_pending_review", acceptance_section["id"]
+    evidence_queue, evidence_focus = review_target(("evidence_sensitive", "needs_answer"))
+    gate_queue, gate_focus = review_target(("needs_answer",), ("FIN-",))
     actions = {
         "reviewQueues": {
             "label": "Open review queue",
-            "queue": "needs_answer",
-            "focus": "reviewQueues",
+            "queue": review_queue,
+            "focus": review_focus,
             "summary": f"Needs answer: {queue_counts.get('needs_answer', 0)}; needs confirmation: {queue_counts.get('needs_confirmation', 0)}",
             "impact": "This node summarizes unresolved intake work before gate readiness can advance.",
         },
@@ -215,22 +235,22 @@ def _artpkg_review_action(component_id: str, session: dict[str, Any], aggregatio
         },
         "acceptanceCriteria": {
             "label": "Review acceptance criteria in ArtPkg",
-            "queue": "evidence_sensitive",
-            "focus": "AC-SET",
+            "queue": acceptance_queue,
+            "focus": acceptance_focus,
             "summary": "Primary record set: AC-SET Acceptance criteria",
             "impact": "Criteria gaps affect Gate Readiness and evidence requirements.",
         },
         "evidenceState": {
             "label": "Review evidence-sensitive items",
-            "queue": "evidence_sensitive",
-            "focus": "evidenceState",
+            "queue": evidence_queue,
+            "focus": evidence_focus,
             "summary": f"Evidence-sensitive queue items: {queue_counts.get('evidence_sensitive', 0)}",
             "impact": "Evidence gaps affect validation confidence and downstream acceptance claims.",
         },
         "gateReadiness": {
             "label": "Review final attestations",
-            "queue": "needs_answer",
-            "focus": "FIN-001",
+            "queue": gate_queue,
+            "focus": gate_focus,
             "summary": "Gate readiness depends on unresolved answers, authority, criteria, and evidence.",
             "impact": "Blocked gates limit the next permitted action.",
         },
@@ -242,14 +262,17 @@ def _artpkg_review_action(component_id: str, session: dict[str, Any], aggregatio
             "impact": "This records the review-only next step; it cannot elevate authority.",
         },
     }
-    fallback_focus = answer_ids[0] if answer_ids else (aggregation or {}).get("record_set", component_id)
-    return actions.get(component_id, {
+    fallback_ids = tuple(answer_ids) or tuple((aggregation or {}).get("member_ids", []))
+    fallback_queue, fallback_focus = review_target(tuple(queues) or ("needs_answer",), fallback_ids)
+    action = actions.get(component_id, {
         "label": "Open in ArtPkg",
-        "queue": "needs_answer",
+        "queue": fallback_queue,
         "focus": fallback_focus,
         "summary": f"Mapped ArtPkg item: {fallback_focus}",
         "impact": "Review the source package context before changing downstream readiness.",
     })
+    action["available"] = bool(action.get("focus"))
+    return action
 
 
 def _source_answer(document: dict[str, Any], qid: str) -> dict[str, Any]:

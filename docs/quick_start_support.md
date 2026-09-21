@@ -148,7 +148,31 @@ To stop the intake UI, press `Ctrl+C` in the terminal running it, or find and st
 pkill -f artpkg_intake_server.py
 ```
 
-## 4. One-Shot "Is Everything Up" Check
+## 4. Operational Verification
+
+Run the reusable standard-library verifier from the ArtPkg workspace:
+
+```sh
+python tools/artpkg_operational_check.py
+```
+
+The deep check covers the status service, Archify viewer, intake authentication, questionnaire creation from the regression fixture, Archify validation/delivery, and authenticated retrieval of the generated HTML. It exits `0` only when all required checks pass. A missing Chrome/Chromium visual checker is a warning because it does not prevent HTML generation or browser access.
+
+Deep mode creates a probe session under `.artpkg/users/{username}/sessions/`. Use the non-mutating HTTP/authentication subset for frequent monitoring:
+
+```sh
+python tools/artpkg_operational_check.py --shallow
+```
+
+Other local services can consume structured output:
+
+```sh
+python tools/artpkg_operational_check.py --json
+```
+
+The script reads `artpkg-credentials.json` by default. Use `--username`, `--credentials-file`, or the `ARTPKG_OPERATIONAL_PASSWORD` environment variable to select other local credentials without printing the password.
+
+### Manual fallback
 
 ```sh
 echo "-- ArtPkg container --"
@@ -170,6 +194,7 @@ curl -s -m 3 -u tester1:secret1 -o /dev/null -w 'HTTP %{http_code}\n' http://192
 - **Intake UI returns 401 Unauthorized** → credentials not provided. Use `curl -u tester1:secret1 http://127.0.0.1:8765/` to authenticate.
 - **Server exits with "No credentials configured"** → credentials file not found or `ARTPKG_INTAKE_CREDENTIALS_FILE` not set. Verify file exists and path is correct.
 - **Visualization reports that Archify is not configured** → set `ARTPKG_ARCHIFY_ROOT=/home/rootux/Downloads/archifypro/archify` before starting the intake server.
+- **Visualization fails with `No such file or directory: 'node'`** → Node is missing from the intake server's `PATH`, not necessarily from the machine. Set `ARTPKG_NODE` to the absolute executable path reported by `command -v node`. For systemd, add `Environment=ARTPKG_NODE=/absolute/path/to/node` under `[Service]` in a service override, reload systemd, and restart `artpkg-intake.service`. Systemd does not load your shell's NVM configuration; update the override if that Node version is removed.
 - **Archify visual check reports Chrome or Chromium unavailable** → projection generation and browser access still work, but automated visual checking requires `ARCHIFY_CHROME` to point to an installed Chrome or Chromium executable.
 - **LAN clients cannot connect to port 8765** → confirm the server was started with `--host 0.0.0.0`, then check the host firewall permits TCP port `8765` from the trusted LAN only.
 - **Each user must authenticate separately** → each session is isolated per user in `.artpkg/users/{username}/sessions/`. Users cannot access each other's sessions.

@@ -87,6 +87,14 @@ QUESTION_CATALOG.update({qid: {"id": qid, "prompt": prompt, "type": "REPEATED_RE
 QUESTION_CATALOG.update({qid: {"id": qid, "prompt": prompt, "type": kind} for qid, prompt, kind in [
     ("AUT-007-SCOPE", "Special action exact scope, authorizer, source, recovery, and expiry", "LONG_TEXT"), ("PKG-007-AUTH", "Who designated the source of truth and where recorded?", "LONG_TEXT"), ("SEC-001-CATEGORIES", "Restricted-content categories, allowed/prohibited locations, roles, redaction, and fail-closed behavior", "LONG_TEXT"), ("VAL-001", "Generation evidence", "LONG_TEXT"), ("VAL-002", "Verification evidence", "LONG_TEXT"), ("VAL-003", "Understanding evidence", "LONG_TEXT"), ("VAL-004", "Negative evidence", "LONG_TEXT")
 ]})
+QUESTION_CATALOG.update({qid: {"id": qid, "prompt": prompt, "type": "LONG_TEXT"} for qid, prompt in [
+    ("UXR-001", "UX interface mode decision"),
+    ("UXR-002", "UX control-set decision"),
+    ("UXR-003", "UX numeric and display behavior decision"),
+    ("UXR-004", "UX error and recovery behavior decision"),
+    ("UXR-005", "UX viewport and layout decision"),
+    ("UXR-006", "UX accessibility and keyboard decision"),
+]})
 QUESTION_CATALOG.update({qid: {"id": qid, "prompt": f"SDLC Harness: {qid}", "type": "HARNESS"} for qid in HARNESS_QUESTION_IDS})
 
 # Guidance is deliberately explanatory only. It may narrow the path through the
@@ -111,6 +119,7 @@ QUESTION_GROUPS = {
     "NFR": ("Non-functional requirements", "Record measurable quality, operational, or policy constraints."),
     "AC": ("Acceptance criteria", "Define how a requirement will be shown to pass or fail."),
     "EVD": ("Evidence", "Record what was observed, where it came from, and its limitations."),
+    "UXR": ("UX resolution", "Record explicit product and structural choices needed to prepare a reviewable UX proposal."),
 }
 QUESTION_GUIDANCE = {
     "PKG-006": ("Identify the exact code or document state this package describes so a later reviewer can reproduce the context.", "A commit such as a1b2c3d, a release such as v0.3.0, or a dated snapshot."),
@@ -327,9 +336,11 @@ def render_seed_summary(seeded: dict[str, Any]) -> str:
 
 def _add_seed_record(seeded: dict[str, Any], section: str, fields: dict[str, Any], source_text: str, basis: str = "KEYWORD_MATCH") -> None:
     score, label, priority = _seed_confidence(section, fields, source_text, basis)
+    record_id = fields.get("id") or f"{section[:3].upper()}-{len(seeded.setdefault('records', {}).get(section, [])) + 1:03d}"
+    stored_fields = {key: value for key, value in fields.items() if key != "id"}
     seeded.setdefault("records", {}).setdefault(section, []).append({
-        "id": f"{section[:3].upper()}-{len(seeded.setdefault('records', {}).get(section, [])) + 1:03d}",
-        "fields": fields,
+        "id": record_id,
+        "fields": stored_fields,
         "source_type": "SOURCE_ARTIFACT",
         "source_reference": seeded.get("source_path"),
         "respondent": "agent",
@@ -363,7 +374,7 @@ def _parse_numbered_sections(text: str) -> dict[int, str]:
     return sections
 
 
-def _parse_markdown_table(text: str) -> list[dict[str, str]]:
+def _parse_markdown_table(text: str, location: str = "Markdown table") -> list[dict[str, str]]:
     """Extract table rows from Markdown table format."""
     rows: list[dict[str, str]] = []
     lines = text.strip().split("\n")
@@ -377,7 +388,7 @@ def _parse_markdown_table(text: str) -> list[dict[str, str]]:
     for i, line in enumerate(lines):
         if line.strip().startswith("|"):
             header_line = line
-            if i + 1 < len(lines) and re.search(r'\|[\s-:|]+\|', lines[i + 1]):
+            if i + 1 < len(lines) and re.search(r'\|[-:\s|]+\|', lines[i + 1]):
                 separator_idx = i + 1
                 break
     
@@ -386,13 +397,19 @@ def _parse_markdown_table(text: str) -> list[dict[str, str]]:
     
     # Parse header
     headers = [h.strip() for h in header_line.split("|")[1:-1]]
+    if any(not header for header in headers) or len(set(headers)) != len(headers):
+        raise ValueError(f"{location}: table headers must be non-empty and unique")
     
     # Parse data rows
-    for line in lines[separator_idx + 1:]:
+    for row_number, line in enumerate(lines[separator_idx + 1:], start=1):
         if not line.strip().startswith("|"):
             break
         cells = [c.strip() for c in line.split("|")[1:-1]]
-        if len(cells) == len(headers) and any(cells):  # Skip empty rows
+        if len(cells) != len(headers):
+            raise ValueError(
+                f"{location}: row {row_number} has {len(cells)} cells; expected {len(headers)}"
+            )
+        if any(cells):  # Skip empty rows
             rows.append(dict(zip(headers, cells)))
     
     return rows
@@ -467,19 +484,24 @@ def _extract_functional_requirements(text: str) -> list[tuple[dict[str, Any], st
 
         if any(alias in section_title.lower() for alias in ("requirement", "functional")):
             # Try table parsing first
-            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text)
+            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text + "\n")
             for table in tables:
-                rows = _parse_markdown_table(table)
+                rows = _parse_markdown_table(table, f"Section {section_num} functional requirements")
                 for row in rows:
-                    if row:
-                        req_text = row.get("Requirement") or row.get("requirement") or row.get("Description") or list(row.values())[0]
-                        found.append(({
-                            "requirement": req_text,
-                            "source": row.get("Source", row.get("source", "pre-artifacts")),
-                            "priority": row.get("Priority", row.get("priority", "MUST")).upper() if row.get("Priority") or row.get("priority") else "MUST",
-                            "status": "PROPOSED",
-                            "decision_owner": "Project/product owner"
-                        }, "STRUCTURED_TABLE"))
+                    requirement_id = row.get("Requirement ID", "").strip(" `")
+                    if requirement_id and not requirement_id.startswith("FR-"):
+                        continue
+                    req_text = row.get("Requirement") or row.get("requirement") or row.get("Description")
+                    if not req_text:
+                        continue
+                    found.append(({
+                        "requirement": req_text,
+                        "source": row.get("Source", row.get("source", "pre-artifacts")),
+                        "priority": (row.get("Priority") or row.get("priority") or "MUST").strip(" `").upper(),
+                        "status": "PROPOSED",
+                        "source_status": (row.get("Status") or row.get("status") or "UNKNOWN").strip(" `"),
+                        "decision_owner": "Project/product owner"
+                    }, "STRUCTURED_TABLE"))
 
             # Extract bullet items from section
             for line in section_text.splitlines():
@@ -552,7 +574,7 @@ def _extract_risks(text: str) -> list[tuple[dict[str, Any], str]]:
                 detection_default += f"; residual uncertainty: {residual_uncertainty}"
 
             # Try table parsing
-            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text)
+            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text + "\n")
             for table in tables:
                 rows = _parse_markdown_table(table)
                 for row in rows:
@@ -650,7 +672,7 @@ def _extract_decisions(text: str) -> list[tuple[dict[str, Any], str]]:
 
         if any(alias in section_title.lower() for alias in ("decision", "decisions")):
             # Try table parsing
-            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text)
+            tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text + "\n")
             for table in tables:
                 rows = _parse_markdown_table(table)
                 for row in rows:
@@ -681,10 +703,21 @@ def _extract_open_questions(text: str) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _add(question_text: str) -> None:
+    def _add(question_text: str, record_id: str | None = None, why: str | None = None, status: str | None = None) -> None:
         if question_text and question_text not in seen:
             seen.add(question_text)
-            found.append({"question": question_text, "why_it_matters": "Unknown until confirmed by human review", "decision_owner": "Project/product owner", "needed_by": "Before implementation or production approval", "current_disposition": "OPEN"})
+            found.append({"id": record_id, "question": question_text, "why_it_matters": why or "Unknown until confirmed by human review", "decision_owner": "Project/product owner", "needed_by": "Before implementation or production approval", "current_disposition": status or "OPEN"})
+
+    for table in re.findall(r'(?m)(?:^\|.*\|\s*$\n){3,}', text):
+        for row in _parse_markdown_table(table):
+            record_id = next((value for key, value in row.items() if key.strip().lower() in {"id", "question id"}), "").strip()
+            question = next((value for key, value in row.items() if key.strip().lower() in {"question", "blocking question"}), "").strip()
+            if re.fullmatch(r"Q-B\d+", record_id, re.IGNORECASE) and question:
+                why = next((value for key, value in row.items() if key.strip().lower() in {"why it matters", "why it blocks", "impact"}), None)
+                status = next((value for key, value in row.items() if key.strip().lower() in {"status", "disposition"}), None)
+                _add(question, record_id.upper(), why, status)
+                found[-1]["decision_owner"] = next((value for key, value in row.items() if key.strip().lower() == "decision owner"), found[-1]["decision_owner"])
+                found[-1]["needed_by"] = next((value for key, value in row.items() if key.strip().lower() in {"needed before", "needed by"}), found[-1]["needed_by"])
 
     for line in text.splitlines():
         stripped = line.strip()
@@ -847,6 +880,84 @@ def _extract_field_from_section(text: str, section_num: int, *label_variants: st
     return _extract_labeled_field(section_text, *label_variants) if section_text else None
 
 
+def _normalize_markdown_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _markdown_source_index(text: str) -> list[dict[str, Any]]:
+    """Index headings, table fields, labeled bullets, and prose with source locations."""
+    sections: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for line_number, line in enumerate(text.splitlines(), 1):
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if heading:
+            current = {
+                "title": re.sub(r"^\d+\.\s*", "", heading.group(2)).strip(),
+                "line": line_number,
+                "lines": [],
+            }
+            sections.append(current)
+        elif current is not None:
+            current["lines"].append((line_number, line))
+
+    indexed: list[dict[str, Any]] = []
+    for section in sections:
+        reference = f"{section['title']} (line {section['line']})"
+        lines = section["lines"]
+        section_items: list[str] = []
+        for offset, (line_number, line) in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("|") and offset + 1 < len(lines) and re.match(r"^\s*\|[-:\s|]+\|?\s*$", lines[offset + 1][1]):
+                headers = [cell.strip() for cell in stripped.strip("|").split("|")]
+                cursor = offset + 2
+                while cursor < len(lines) and lines[cursor][1].strip().startswith("|"):
+                    cells = [cell.strip().strip("`") for cell in lines[cursor][1].strip().strip("|").split("|")]
+                    if len(cells) != len(headers):
+                        raise ValueError(f"{reference}: table row at line {lines[cursor][0]} has {len(cells)} cells; expected {len(headers)}")
+                    row = dict(zip(headers, cells))
+                    if "Field" in row and "Value" in row:
+                        indexed.append({"label": row["Field"], "value": row["Value"], "reference": reference})
+                    cursor += 1
+            bullet = re.match(r"^[-*]\s+(.+?)[?:]\s*(.+)$", stripped)
+            if bullet:
+                indexed.append({"label": bullet.group(1).strip(), "value": bullet.group(2).strip().strip("`"), "reference": reference})
+            elif stripped.startswith(("- ", "* ")):
+                section_items.append(stripped[2:].strip().strip("`"))
+        prose = [line.strip().strip("`") for _, line in lines if line.strip() and not line.strip().startswith(("#", "|", "-", "*", ">", "```"))]
+        section_value = " ".join(prose + section_items)
+        if section_value:
+            indexed.append({"label": section["title"], "value": section_value, "reference": reference})
+    return indexed
+
+
+def _candidate_from_index(index: list[dict[str, Any]], aliases: tuple[str, ...]) -> dict[str, Any] | None:
+    normalized_aliases = {_normalize_markdown_label(alias) for alias in aliases}
+    matches = [entry for entry in index if _normalize_markdown_label(entry["label"]) in normalized_aliases and entry["value"]]
+    if not matches:
+        return None
+    values_by_label: dict[str, set[str]] = {}
+    for entry in matches:
+        values_by_label.setdefault(_normalize_markdown_label(entry["label"]), set()).add(_normalize_markdown_label(entry["value"]))
+    source_status = "CONFLICTED" if any(len(values) > 1 for values in values_by_label.values()) else "PROVIDED_REVIEW_REQUIRED"
+    value = matches[0]["value"] if len(matches) == 1 else "\n".join(f"{entry['reference']}: {entry['value']}" for entry in matches)
+    explicit_state = matches[0]["value"].strip().strip("`").upper()
+    state = explicit_state if explicit_state in {"UNKNOWN", "DEFERRED", "NOT_APPLICABLE"} else "PROVIDED"
+    if explicit_state == "REJECTED":
+        state = "UNKNOWN"
+        source_status = "REJECTED"
+    if source_status == "CONFLICTED":
+        state = "UNKNOWN"
+    claim_statuses = [status for status in ("CONFIRMED_BY_USER", "OBSERVED", "PROPOSED", "INFERRED", "UNKNOWN", "DEFERRED", "REJECTED") if any(re.search(rf"(?<![A-Z_]){status}(?![A-Z_])", entry["value"]) for entry in matches)]
+    return {
+        "value": value,
+        "state": state,
+        "source_status": source_status if source_status in {"CONFLICTED", "REJECTED"} or state == "PROVIDED" else f"EXPLICIT_{state}" if state == "UNKNOWN" else state,
+        "source_reference": "; ".join(dict.fromkeys(entry["reference"] for entry in matches)),
+        "source_excerpt": " | ".join(entry["value"] for entry in matches),
+        "source_claim_statuses": claim_statuses,
+    }
+
+
 def _extract_bullet_list_from_subsection(text: str, section_num: int, subsection_alias: str) -> str | None:
     section_text = _parse_numbered_sections(text).get(section_num)
     if not section_text:
@@ -867,7 +978,21 @@ def _extract_non_functional_requirements(text: str) -> list[tuple[dict[str, Any]
     requirement statements are their indented sub-bullets.
     """
     found: list[tuple[dict[str, Any], str]] = []
-    for section_text in _parse_numbered_sections(text).values():
+    for section_num, section_text in _parse_numbered_sections(text).items():
+        tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text + "\n")
+        for table in tables:
+            for row in _parse_markdown_table(table, f"Section {section_num} non-functional requirements"):
+                requirement_id = row.get("Requirement ID", "").strip(" `")
+                if not requirement_id.startswith("NFR-"):
+                    continue
+                found.append(({
+                    "category": (row.get("Category") or "UNKNOWN").strip(" `"),
+                    "requirement": row.get("Requirement", ""),
+                    "measurement": row.get("Measurement") or row.get("Proposed measurement") or "UNKNOWN",
+                    "source": row.get("Source", "pre-artifacts"),
+                    "status": "PROPOSED",
+                    "source_status": (row.get("Status") or "UNKNOWN").strip(" `"),
+                }, "STRUCTURED_TABLE"))
         for title, content in _split_subsections(section_text).items():
             if "non-functional" not in title and "non functional" not in title:
                 continue
@@ -903,6 +1028,28 @@ def _extract_non_functional_requirements(text: str) -> list[tuple[dict[str, Any]
                         "source": "pre-artifacts",
                         "status": "PROPOSED",
                     }, "SECTION_MATCH"))
+    return found
+
+
+def _extract_acceptance_criteria(text: str) -> list[tuple[dict[str, Any], str]]:
+    found: list[tuple[dict[str, Any], str]] = []
+    for section_num, section_text in _parse_numbered_sections(text).items():
+        tables = re.findall(r'\|.*\n\|[-:\s|]+\n(?:\|.*\n)+', section_text + "\n")
+        for table in tables:
+            for row in _parse_markdown_table(table, f"Section {section_num} acceptance criteria"):
+                criterion_id = (row.get("Criterion ID") or "").strip(" `")
+                if not criterion_id.startswith("AC-"):
+                    continue
+                found.append(({
+                    "requirement_ids": row.get("Requirement IDs") or row.get("Related requirement/outcome IDs") or "UNKNOWN",
+                    "pass_condition": row.get("Pass condition", "UNKNOWN"),
+                    "validation_method": row.get("Validation method") or row.get("Validation approach") or "UNKNOWN",
+                    "expected_evidence": row.get("Evidence artifact") or row.get("Required evidence") or "UNKNOWN",
+                    "evidence_ids": "EVIDENCE_REQUIRED",
+                    "approver": "Project/product owner",
+                    "status": "PROPOSED",
+                    "source_status": (row.get("Status") or "UNKNOWN").strip(" `"),
+                }, "STRUCTURED_TABLE"))
     return found
 
 
@@ -1034,9 +1181,23 @@ def _extract_external_dependencies(text: str) -> list[dict[str, Any]]:
 
 def seed_from_pre_artifacts(path: str) -> dict[str, Any]:
     text = Path(path).read_text(encoding="utf-8")
-    seeded = {"source_path": path, "seeded_at": now(), "answers": {}, "records": {}}
+    source_index = _markdown_source_index(text)
+    source_statuses = [
+        status for status in (
+            "CONFIRMED_BY_USER", "OBSERVED", "PROPOSED", "INFERRED", "UNKNOWN",
+            "DEFERRED", "REJECTED",
+        )
+        if re.search(rf"(?<![A-Z_]){status}(?![A-Z_])", text)
+    ]
+    seeded = {
+        "source_path": path,
+        "seeded_at": now(),
+        "source_statuses": source_statuses,
+        "answers": {},
+        "records": {},
+    }
 
-    def add_seed(qid: str, value: Any, state: str = "PROVIDED") -> None:
+    def add_seed(qid: str, value: Any, state: str = "PROVIDED", candidate: dict[str, Any] | None = None) -> None:
         score, label, priority = _seed_confidence(qid, value, text)
         seeded["answers"][qid] = {
             "value": value,
@@ -1049,31 +1210,57 @@ def seed_from_pre_artifacts(path: str) -> dict[str, Any]:
             "review_priority": priority,
             "confidence_basis": "Deterministic section and keyword matching from the pre-artifacts source",
         }
+        if candidate:
+            seeded["answers"][qid].update({
+                "source_status": candidate["source_status"],
+                "source_reference": f"{path} :: {candidate['source_reference']}",
+                "source_excerpt": candidate["source_excerpt"],
+                "source_claim_statuses": candidate.get("source_claim_statuses", []),
+            })
+
+    def add_candidate(qid: str, aliases: tuple[str, ...], legacy_value: str | None = None) -> None:
+        candidate = _candidate_from_index(source_index, aliases)
+        if candidate:
+            add_seed(qid, candidate["value"], candidate["state"], candidate)
+        elif legacy_value:
+            add_seed(qid, legacy_value, "PROVIDED", {
+                "source_status": "PROVIDED_REVIEW_REQUIRED",
+                "source_reference": "legacy numbered-section mapping",
+                "source_excerpt": legacy_value,
+            })
+        else:
+            add_seed(qid, "UNKNOWN", "UNKNOWN", {
+                "source_status": "ABSENT", "source_reference": "no matching source field", "source_excerpt": "",
+            })
 
     def add_seed_or_unknown(qid: str, value: str | None) -> None:
-        add_seed(qid, value, "PROVIDED") if value else add_seed(qid, "UNKNOWN", "UNKNOWN")
+        add_candidate(qid, (), value)
 
     project_name = None
     for line in text.splitlines():
         if "- Project name:" in line:
             project_name = line.split(":", 1)[1].strip()
             break
-    add_seed_or_unknown("PKG-001", project_name)
+    add_candidate("PKG-001", ("Project", "Project name", "Working project name"), project_name)
 
     # A pre-artifacts package is, by definition, discovery-stage input; the
     # keyword checks below only affect confidence scoring, not this default.
     add_seed("PKG-002", "DISCOVERY")
 
-    # PKG-003..PKG-006 describe the ArtPkg package itself (owner, respondent,
-    # workspace, snapshot), not the project under discussion. A generic
-    # discovery document has no truthful way to answer these, so they are
-    # left UNKNOWN rather than guessed.
-    add_seed("PKG-003", "UNKNOWN", "UNKNOWN")
-    add_seed("PKG-004", "UNKNOWN", "UNKNOWN")
-    add_seed("PKG-005", "UNKNOWN", "UNKNOWN")
-    add_seed("PKG-006", "UNKNOWN", "UNKNOWN")
-    add_seed_or_unknown("PKG-008", _extract_field_from_section(text, 1, "Primary goal") or _extract_field_from_section(text, 1, "Short description"))
-    add_seed_or_unknown("PKG-009", _extract_field_from_section(text, 16, "Boundary statement"))
+    add_candidate("PKG-003", ("Owner", "Package owner", "Decision owner"))
+    add_candidate("PKG-004", ("Prepared for", "Prepared by", "Respondent", "Respondent and role"))
+    add_candidate("PKG-005", ("Repository or workspace", "Target repository/workspace", "Target repository"))
+    repository = seeded["answers"]["PKG-005"]
+    if repository["state"] == "PROVIDED" and _normalize_markdown_label(str(repository["value"])) in {"not created", "none", "not applicable"}:
+        add_seed("PKG-006", "NOT_APPLICABLE", "NOT_APPLICABLE", {
+            "source_status": "NOT_APPLICABLE",
+            "source_reference": repository["source_reference"].split(" :: ", 1)[-1],
+            "source_excerpt": f"Repository is {repository['value']}",
+        })
+    else:
+        add_candidate("PKG-006", ("Version or snapshot", "Repository snapshot", "Snapshot identity"))
+    add_candidate("PKG-008", ("Package claim", "Package coverage claim", "What the user wants to build", "Primary goal", "Short description"), _extract_field_from_section(text, 1, "Primary goal") or _extract_field_from_section(text, 1, "Short description"))
+    add_candidate("PKG-009", ("Package limitations", "Boundary statement"), _extract_field_from_section(text, 16, "Boundary statement"))
 
     # No pre-artifacts discovery document can itself grant implementation
     # authority; apply_conditionals() derives AUT-002..AUT-007-SCOPE as
@@ -1081,21 +1268,23 @@ def seed_from_pre_artifacts(path: str) -> dict[str, Any]:
     # are intentionally not seeded here.
     add_seed("AUT-001", "NOT_EVALUATED")
 
-    add_seed_or_unknown("OVR-001", _extract_field_from_section(text, 2, "What problem is being solved?"))
-    add_seed_or_unknown("OVR-002", _extract_field_from_section(text, 3, "Desired result or observable outcome"))
+    add_candidate("OVR-001", ("Problem", "Problem statement", "What problem is being solved?"), _extract_field_from_section(text, 2, "What problem is being solved?"))
+    add_candidate("OVR-002", ("Intended outcome", "Intended result", "Desired result or observable outcome"), _extract_field_from_section(text, 3, "Desired result or observable outcome"))
     add_seed_or_unknown("BND-001", _extract_bullet_list_from_subsection(text, 5, "in scope"))
     add_seed_or_unknown("BND-002", _extract_bullet_list_from_subsection(text, 5, "out of scope"))
 
-    restricted_answer = _extract_field_from_section(text, 19, "Does this project involve sensitive data, credentials, regulated information, or restricted content?")
-    if restricted_answer:
-        add_seed("SEC-001", "YES" if restricted_answer.lower().startswith("yes") else "NO")
+    restricted_aliases = ("Restricted content", "Restricted content?", "Does this project involve sensitive data, credentials, regulated information, or restricted content?")
+    restricted_candidate = _candidate_from_index(source_index, restricted_aliases)
+    restricted_answer = restricted_candidate["value"] if restricted_candidate else _extract_field_from_section(text, 19, restricted_aliases[-1])
+    if restricted_answer and restricted_answer.strip().strip("`").upper() not in {"UNKNOWN", "DEFERRED"}:
+        add_seed("SEC-001", "YES" if restricted_answer.lower().startswith("yes") else "NO", "PROVIDED", restricted_candidate)
         if restricted_answer.lower().startswith("yes"):
             safeguards = _extract_field_from_section(text, 19, "If yes, what safeguards are required?")
             redaction = _extract_field_from_section(text, 19, "Are any redaction or access controls needed?")
             categories = "; ".join(part for part in (safeguards, redaction) if part)
             add_seed_or_unknown("SEC-001-CATEGORIES", categories)
     else:
-        add_seed("SEC-001", "UNKNOWN", "UNKNOWN")
+        add_candidate("SEC-001", restricted_aliases, restricted_answer)
 
     # PKG-007 (source of truth) is, by construction, the pre-artifacts file this
     # package was seeded from; PKG-007-AUTH records that it was human-supplied,
@@ -1103,11 +1292,27 @@ def seed_from_pre_artifacts(path: str) -> dict[str, Any]:
     add_seed("PKG-007", path)
     add_seed("PKG-007-AUTH", "Supplied by the requesting user as the discovery source for this package; not a formally designated authoritative source of truth")
 
-    add_seed_or_unknown("OVR-003", _extract_field_from_section(text, 4, "What is already working?"))
-    add_seed_or_unknown("OVR-004", _extract_field_from_section(text, 4, "What is partially complete?"))
-    add_seed_or_unknown("OVR-005", _extract_field_from_section(text, 4, "What is blocked or uncertain?"))
-    add_seed_or_unknown("OVR-007", _extract_field_from_section(text, 14, "What is still unverified?"))
-    add_seed_or_unknown("OVR-008", _extract_field_from_section(text, 18, "Proposed next outcome"))
+    add_candidate("OVR-003", ("Completed", "Completed work", "What is already working?"), _extract_field_from_section(text, 4, "What is already working?"))
+    add_candidate("OVR-004", ("In progress", "Work in progress", "What is partially complete?"), _extract_field_from_section(text, 4, "What is partially complete?"))
+    maturity = _candidate_from_index(source_index, ("Project maturity", "Current maturity", "Maturity"))
+    maturity_value = _normalize_markdown_label(str(maturity["value"])) if maturity else ""
+    concept_stage = any(label in maturity_value for label in ("discussed concept", "concept stage")) or maturity_value == "concept"
+    repository_not_created = repository["state"] == "PROVIDED" and _normalize_markdown_label(str(repository["value"])) == "not created"
+    if concept_stage and repository_not_created:
+        inferred_reference = f"{maturity['source_reference']}; {repository['source_reference'].split(' :: ', 1)[-1]}"
+        if seeded["answers"]["OVR-003"]["source_status"] == "ABSENT":
+            add_seed("OVR-003", "Planning discussion and Pre-Artifacts Package preparation only; no implementation evidence exists.", "PROVIDED", {
+                "source_status": "PROVIDED_REVIEW_REQUIRED", "source_reference": inferred_reference,
+                "source_excerpt": "Concept-stage package with repository NOT_CREATED", "source_claim_statuses": ["INFERRED"],
+            })
+        if seeded["answers"]["OVR-004"]["source_status"] == "ABSENT":
+            add_seed("OVR-004", "Requirements discovery and human reconciliation are in progress.", "PROVIDED", {
+                "source_status": "PROVIDED_REVIEW_REQUIRED", "source_reference": inferred_reference,
+                "source_excerpt": "Concept-stage package with repository NOT_CREATED", "source_claim_statuses": ["INFERRED"],
+            })
+    add_candidate("OVR-005", ("Blocked", "Current blockers", "Blocking questions", "What is blocked or uncertain?"), _extract_field_from_section(text, 4, "What is blocked or uncertain?"))
+    add_candidate("OVR-007", ("Unverified", "Unverified claims", "What was not inspected or verified", "What is still unverified?"), _extract_field_from_section(text, 14, "What is still unverified?"))
+    add_candidate("OVR-008", ("Recommended next checkpoint", "Recommended first bounded outcome", "Next proposed checkpoint", "Proposed next outcome"), _extract_field_from_section(text, 18, "Proposed next outcome"))
 
     def merge_records(section: str, extracted: list[tuple[dict[str, Any], str]]) -> None:
         if extracted:
@@ -1123,6 +1328,7 @@ def seed_from_pre_artifacts(path: str) -> dict[str, Any]:
 
     merge_records("functional_requirements", _extract_functional_requirements(text))
     merge_records("non_functional_requirements", _extract_non_functional_requirements(text))
+    merge_records("acceptance_criteria", _extract_acceptance_criteria(text))
     merge_records("risks", _extract_risks(text))
     merge_records("decisions", _extract_decisions(text))
     merge_records("evidence", _extract_evidence_items(text))
@@ -1151,7 +1357,8 @@ def merge_seed_records(document: dict[str, Any], seed: dict[str, Any]) -> dict[s
         if section not in RECORD_FIELDS:
             continue
         for record in records:
-            record_id = add_record(document, section, record["fields"], source_type="SOURCE_ARTIFACT")
+            requested_id = record.get("id") if re.fullmatch(r"Q-B\d+", str(record.get("id", "")), re.IGNORECASE) else None
+            record_id = add_record(document, section, record["fields"], source_type="SOURCE_ARTIFACT", record_id=requested_id)
             stored = find_record(document, record_id)
             stored["source_reference"] = seed.get("source_path")
             for meta in ("confidence_score", "confidence_label", "review_priority", "confidence_basis"):
@@ -1204,7 +1411,7 @@ def _bullets_after_heading(text: str, heading: str) -> str:
     return "\n".join(items)
 
 
-def _parse_markdown_table(text: str) -> list[list[str]]:
+def _parse_addendum_table(text: str) -> list[list[str]]:
     rows: list[list[str]] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -1308,7 +1515,7 @@ def apply_decision_resolution_addendum(document: dict[str, Any], addendum_path: 
             "status": _status_value(_bullet_value(block, "Status"), "PROPOSED"),
         }, "HUMAN_DECLARATION", source, result["acceptance_criteria"])
 
-    for cells in _parse_markdown_table(_section_text(text, 7))[1:]:
+    for cells in _parse_addendum_table(_section_text(text, 7))[1:]:
         if len(cells) < 4:
             continue
         record_id, title = _question_id_and_title(cells[0])
@@ -1349,23 +1556,54 @@ def migrate_v01_to_v02(document: dict[str, Any]) -> dict[str, Any]:
     apply_conditionals(migrated); return migrated
 
 def _set_derived_na(document: dict[str, Any], question_id: str, reason: str) -> None:
-    document.setdefault("answers", {})[question_id] = answer(None, "NOT_APPLICABLE", "DERIVED_BY_SCRIPT", reason, document.get("respondent", ""))
+    answers = document.setdefault("answers", {})
+    previous = answers.get(question_id)
+    if previous is not None:
+        if previous.get("source_type") != "DERIVED_BY_SCRIPT":
+            document.setdefault("answer_history", []).append({
+                "question_id": question_id,
+                "previous": copy.deepcopy(previous),
+                "timestamp": now(),
+                "conditional_suppression": reason,
+            })
+        elif (previous.get("state"), previous.get("value"), previous.get("source_reference")) == ("NOT_APPLICABLE", None, reason):
+            return
+    answers[question_id] = answer(None, "NOT_APPLICABLE", "DERIVED_BY_SCRIPT", reason, document.get("respondent", ""))
+
+def _restore_conditional_answer(document: dict[str, Any], question_id: str, reason: str) -> None:
+    answers = document.get("answers", {})
+    current = answers.get(question_id)
+    if not current or current.get("source_type") != "DERIVED_BY_SCRIPT" or current.get("state") != "NOT_APPLICABLE":
+        return
+    # History order, not second-resolution timestamps, determines the latest edit.
+    # Never search past a newer replacement to resurrect an older explicit answer.
+    for entry in reversed(document.get("answer_history", [])):
+        if entry.get("question_id") != question_id:
+            continue
+        previous = entry.get("previous")
+        if (entry.get("conditional_suppression") == reason == current.get("source_reference")
+                and isinstance(previous, dict) and previous.get("source_type") != "DERIVED_BY_SCRIPT"):
+            answers[question_id] = copy.deepcopy(previous)
+            return
+        break
+    # An active question with no recoverable explicit answer must be asked again.
+    answers.pop(question_id)
 
 def apply_conditionals(document: dict[str, Any]) -> None:
     purpose = _value(document, "PKG-002")
     authority = _value(document, "AUT-001")
-    if purpose != "CROSS_PROJECT_TRANSFER": _set_derived_na(document, "XFR-SET", "PKG-002 is not CROSS_PROJECT_TRANSFER")
-    if authority in (None, "NONE", "NOT_EVALUATED"):
-        for qid in ("AUT-002", "AUT-003", "AUT-004", "AUT-005", "AUT-006", "AUT-007-SCOPE"): _set_derived_na(document, qid, "AUT-001 does not claim authority")
-    if _value(document, "SEC-001") != "YES": _set_derived_na(document, "SEC-001-CATEGORIES", "SEC-001 is not YES")
-    if not document.get("setup", {}).get("harness_enabled"):
-        for qid in HARNESS_QUESTION_IDS:
-            if qid != "HAR-000": _set_derived_na(document, qid, "HAR-000 is NO")
-    else:
-        for qid in HARNESS_QUESTION_IDS:
-            item = document.get("answers", {}).get(qid)
-            if item and item.get("source_type") == "DERIVED_BY_SCRIPT" and item.get("state") == "NOT_APPLICABLE":
-                document["answers"].pop(qid)
+    groups = (
+        (purpose != "CROSS_PROJECT_TRANSFER", ("XFR-SET",), "PKG-002 is not CROSS_PROJECT_TRANSFER"),
+        (authority in (None, "NONE", "NOT_EVALUATED"), ("AUT-002", "AUT-003", "AUT-004", "AUT-005", "AUT-006", "AUT-007-SCOPE"), "AUT-001 does not claim authority"),
+        (_value(document, "SEC-001") != "YES", ("SEC-001-CATEGORIES",), "SEC-001 is not YES"),
+        (not document.get("setup", {}).get("harness_enabled"), tuple(qid for qid in HARNESS_QUESTION_IDS if qid != "HAR-000"), "HAR-000 is NO"),
+    )
+    for inactive, question_ids, reason in groups:
+        for qid in question_ids:
+            if inactive:
+                _set_derived_na(document, qid, reason)
+            else:
+                _restore_conditional_answer(document, qid, reason)
 
 def set_harness_mode(document: dict[str, Any], enabled: bool) -> None:
     previous = document.get("setup", {}).get("harness_enabled", False)
@@ -1410,7 +1648,21 @@ def validate_harness_transitions(document: dict[str, Any], errors: list[str], bl
     if states["checkpoint_acceptance"] == "ACCEPTED" and states["next_phase_authorization"] == "AUTHORIZED" and not _transition_support(document, "next_phase_authorization").get("separate_authorizer"):
         errors.append("next_phase_authorization: checkpoint acceptance cannot authorize advancement without separate authorizer"); blockers.append("next_phase_authorization")
 
+def normalize_answer_value(question_id: str, value: Any, state: str = "PROVIDED") -> Any:
+    if state != "PROVIDED": return value
+    question = QUESTION_CATALOG.get(question_id)
+    if not question: return value
+    if question["type"] == "BOOLEAN":
+        if isinstance(value, bool): value = "YES" if value else "NO"
+        elif isinstance(value, str): value = value.strip().upper()
+    elif question["type"] in {"ENUM", "MULTI_ENUM"} and isinstance(value, str): value = value.strip().upper()
+    choices = ENUM_CHOICES.get(question_id)
+    if choices and value not in choices: raise ValueError(f"{question_id} must be one of: {', '.join(sorted(choices))}")
+    if question["type"] in {"SHORT_TEXT", "PATH_OR_URI"} and value in {None, ""}: raise ValueError(f"{question_id} requires a non-empty value")
+    return value
+
 def set_answer(document: dict[str, Any], question_id: str, value: Any, state: str = "PROVIDED", source_type: str = "HUMAN_DECLARATION", source_reference: str | None = None) -> None:
+    value = normalize_answer_value(question_id, value, state)
     previous = document.setdefault("answers", {}).get(question_id)
     if previous is not None and (previous.get("value"), previous.get("state")) != (value, state): document.setdefault("answer_history", []).append({"question_id": question_id, "previous": previous, "timestamp": now()})
     document["answers"][question_id] = answer(value, state, source_type, source_reference, document.get("respondent", "")); document["updated"] = now()
@@ -1495,7 +1747,7 @@ def validate_document_shape(document: dict[str, Any]) -> None:
     for section in ID_PREFIXES:
         if not isinstance(document["records"].get(section), list): raise ValueError(f"records.{section} must be a list")
         for record in document["records"][section]:
-            if not re.fullmatch(r"(?:[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}|P1-Q\d+)", str(record.get("id", ""))): raise ValueError("record has invalid stable ID")
+            if not re.fullmatch(r"(?:[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}|Q-B\d+|P1-Q\d+)", str(record.get("id", ""))): raise ValueError("record has invalid stable ID")
 
 def save_answers(document: dict[str, Any], path: str) -> None:
     validate_document_shape(document); target = Path(path); target.parent.mkdir(parents=True, exist_ok=True); payload = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
@@ -1523,6 +1775,21 @@ def _field(record: dict[str, Any], *names: str) -> Any:
         if name in record.get("fields", {}): return record["fields"][name]
     return None
 
+def _reference_ids(value: Any) -> list[str]:
+    values = value if isinstance(value, list) else re.split(r"\s*[,;]\s*", str(value or ""))
+    references: list[str] = []
+    for raw in values:
+        reference = str(raw).strip()
+        match = re.fullmatch(r"([A-Z]+(?:-[A-Z]+)*)-(\d{3})\s*[–—-]\s*([A-Z]+(?:-[A-Z]+)*)-(\d{3})", reference)
+        if match and match.group(1) == match.group(3):
+            start, end = int(match.group(2)), int(match.group(4))
+            if start <= end and end - start <= 100:
+                references.extend(f"{match.group(1)}-{number:03d}" for number in range(start, end + 1))
+                continue
+        if reference:
+            references.append(reference)
+    return references
+
 def validate_answers(document: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []; warnings: list[str] = []; blockers: list[str] = []; answers = document.get("answers", {})
     for qid, item in answers.items():
@@ -1531,9 +1798,11 @@ def validate_answers(document: dict[str, Any]) -> dict[str, Any]:
     ids = {record["id"] for records in document.get("records", {}).values() for record in records}
     for section in ("functional_requirements", "non_functional_requirements", "acceptance_criteria", "phases", "artifacts"):
         for record in _records(document, section):
-            refs = _field(record, "linked_requirement_ids", "requirement_ids", "linked_acceptance_criterion_ids", "related_ids") or []; refs = [refs] if isinstance(refs, str) else refs
+            refs = _reference_ids(_field(record, "linked_requirement_ids", "requirement_ids", "linked_acceptance_criterion_ids", "related_ids"))
             for ref in refs:
-                if ref not in ids: errors.append(f"{record['id']}: invalid cross-reference {ref}"); blockers.append(record["id"])
+                namespace = ref.split("-", 1)[0]
+                if namespace in {"FR", "NFR", "AC", "PH", "ART", "EVD"} and ref not in ids:
+                    errors.append(f"{record['id']}: invalid cross-reference {ref}"); blockers.append(record["id"])
     authority = _value(document, "AUT-001", "NOT_EVALUATED")
     if authority not in (None, "NONE", "NOT_EVALUATED"):
         for qid in ("AUT-002", "AUT-003", "AUT-004", "AUT-005", "AUT-006"):

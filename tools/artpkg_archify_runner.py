@@ -109,12 +109,21 @@ def _run(config: ArchifyConfig, args: list[str]) -> dict[str, Any]:
         exit_code = "ARCHIFY_INVOCATION_FAILED"
         stdout = ""
         stderr = str(exc)
-        receipt = {
-            "ok": False,
-            "error": (
+        if exc.filename == config.node_executable:
+            error = (
+                f"Could not launch Node.js executable {config.node_executable!r}: {exc}. "
+                "Set ARTPKG_NODE to the absolute path of an executable Node.js installation "
+                "in the intake server environment, then restart the server. "
+                "System services do not inherit your shell's NVM/PATH configuration."
+            )
+        else:
+            error = (
                 f"Could not invoke Archify in {config.archify_root!r}: {exc}. Set the ARTPKG_ARCHIFY_ROOT "
                 "environment variable to a local Archify checkout path before running visualizations."
-            ),
+            )
+        receipt = {
+            "ok": False,
+            "error": error,
         }
         ok = False
 

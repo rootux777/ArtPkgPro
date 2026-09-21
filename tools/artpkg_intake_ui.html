@@ -9,9 +9,8 @@
     body { margin:0; }
     header { padding:18px 24px; border-bottom:1px solid #d8dee6; background:#fff; display:flex; align-items:center; justify-content:space-between; gap:16px; }
     h1 { font-size:20px; margin:0; letter-spacing:0; }
-    main { display:grid; grid-template-columns:320px 1fr; min-height:calc(100vh - 65px); }
-    aside { border-right:1px solid #d8dee6; background:#fff; padding:18px; }
-    section { padding:18px 22px; }
+    main { min-height:calc(100vh - 65px); }
+    section { padding:18px 22px; max-width:1440px; margin:0 auto; }
     label { display:block; font-weight:650; margin-bottom:8px; }
     input[type=file], textarea, select { width:100%; box-sizing:border-box; border:1px solid #b8c2cc; border-radius:6px; padding:10px; background:#fff; }
     textarea { min-height:84px; resize:vertical; font-family:Consolas, monospace; font-size:12px; }
@@ -21,17 +20,22 @@
     button:disabled { cursor:not-allowed; opacity:0.55; }
     button.primary { background:#174ea6; border-color:#174ea6; color:#fff; }
     button.danger { border-color:#b42318; color:#b42318; }
+    [hidden] { display:none !important; }
     .stack { display:grid; gap:12px; }
-    .sidebar-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    .review-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 14px; }
+    .intake-toolbar { display:grid; gap:12px; margin:0 0 16px; padding:14px; border:1px solid #d8dee6; border-radius:8px; background:#fff; }
+    .intake-controls { display:grid; grid-template-columns:minmax(260px, 1fr) auto; gap:12px; align-items:end; }
+    .toolbar-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .toolbar-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
     .review-toolbar-text { color:#52606d; font-size:13px; line-height:1.35; max-width:620px; }
     .queue-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
     .queue-tabs button[aria-pressed=true] { background:#17202a; color:#fff; }
     .card { border:1px solid #d8dee6; border-radius:8px; background:#fff; padding:14px; display:grid; gap:8px; }
     .card[data-focus-match=true] { border-color:#174ea6; box-shadow:0 0 0 3px rgba(23, 78, 166, .16); }
     .meta { color:#52606d; font-size:12px; }
-    .guidance { border-left:3px solid #2f6f5e; background:#eef7f3; padding:10px 12px; display:grid; gap:6px; font-size:13px; line-height:1.4; }
-    .guidance-title { font-weight:700; color:#183d34; }
+    .guidance { border-left:3px solid #2f6f5e; background:#eef7f3; padding:12px 14px; display:grid; gap:8px; font-size:13px; line-height:1.4; }
+    .guidance-title { font-size:17px; font-weight:700; color:#183d34; }
+    .guidance-kicker { color:#52606d; font-size:12px; font-weight:700; text-transform:uppercase; }
+    .guidance-example { color:#34495e; }
     .guidance-row { display:grid; gap:2px; }
     .guidance-block { display:grid; gap:4px; padding:8px 0; border-top:1px solid rgba(47, 111, 94, .22); }
     .guidance-block:first-of-type { border-top:0; padding-top:0; }
@@ -39,6 +43,7 @@
     .guidance-list { margin:0; padding-left:18px; display:grid; gap:3px; }
     details.guidance-details { border-top:1px solid rgba(47, 111, 94, .22); padding-top:8px; }
     details.guidance-details summary { cursor:pointer; font-weight:700; }
+    details.guidance-details[open] summary { margin-bottom:8px; }
     .field-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; }
     .field-note { border:1px solid #d8dee6; border-radius:6px; padding:8px; background:#fff; display:grid; gap:4px; }
     .field-note strong { font-size:13px; }
@@ -48,8 +53,24 @@
     .projection-link { display:inline-flex; align-items:center; width:max-content; border:1px solid #174ea6; border-radius:6px; background:#174ea6; color:#fff; font-weight:700; text-decoration:none; padding:8px 11px; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; }
     .status { font-size:13px; color:#52606d; }
+    .blocker-review { display:grid; gap:12px; margin:16px 0; padding:16px; border:1px solid #d8a20b; border-radius:8px; background:#fffaf0; }
+    .blocker-review h2 { margin:0; font-size:17px; }
+    .blocker-link { color:#174ea6; font-weight:650; }
+    .seal-review { margin-top:24px; padding:22px 0; border-top:2px solid #17202a; display:grid; gap:16px; }
+    .seal-review h2 { margin:0; font-size:19px; }
+    .seal-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px 22px; }
+    .seal-field { display:grid; gap:3px; min-width:0; }
+    .seal-field span { overflow-wrap:anywhere; }
+    .seal-list { margin:0; padding-left:20px; }
+    .seal-confirmation { white-space:pre-line; font-weight:650; }
+    .pipeline-progress { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); border:1px solid #d8dee6; border-radius:8px; overflow:hidden; background:#fff; }
+    .pipeline-step { display:grid; align-content:start; gap:5px; min-width:0; padding:12px; border-right:1px solid #d8dee6; }
+    .pipeline-step:last-child { border-right:0; }
+    .pipeline-step strong, .pipeline-step span { overflow-wrap:anywhere; }
+    .pipeline-state { width:max-content; max-width:100%; padding:3px 6px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; background:#e8f3ee; color:#1f5c45; }
+    .pipeline-state.pending { background:#f1f3f5; color:#52606d; }
     iframe { width:100%; min-height:560px; border:1px solid #d8dee6; border-radius:8px; background:#fff; }
-    @media (max-width: 860px) { main { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid #d8dee6; } .answer-controls { grid-template-columns:1fr; } }
+    @media (max-width: 860px) { .intake-controls { grid-template-columns:1fr; } .answer-controls { grid-template-columns:1fr; } .pipeline-progress { grid-template-columns:1fr; } .pipeline-step { border-right:0; border-bottom:1px solid #d8dee6; } .pipeline-step:last-child { border-bottom:0; } }
   </style>
 </head>
 <body>
@@ -58,27 +79,46 @@
     <div class="status" id="status">No session loaded</div>
   </header>
   <main>
-    <aside class="stack">
-      <div>
-        <label for="preArtifactsFile">Pre-artifacts file</label>
-        <input id="preArtifactsFile" type="file" accept=".md,.markdown,.txt">
-      </div>
-      <label class="check">
-        <input id="restrictedAck" type="checkbox">
-        <span>I have checked this local upload for secrets, credentials, regulated data, and restricted content handling.</span>
-      </label>
-      <div class="sidebar-actions">
-        <button class="primary" id="upload">Start questionnaire</button>
-      </div>
-      <div id="sessionMeta" class="status"></div>
-    </aside>
     <section>
-      <div class="review-toolbar">
-        <div class="review-toolbar-text">You can answer items now, or visualize unresolved areas first.</div>
-        <button class="primary" id="visualizeGaps">Visualize gaps</button>
+      <div class="intake-toolbar">
+        <label class="check">
+          <input id="restrictedAck" type="checkbox">
+          <span>I have checked this local upload for secrets, credentials, regulated data, and restricted content handling.</span>
+        </label>
+        <div class="intake-controls">
+          <div>
+            <label for="preArtifactsFile">Pre-artifacts file</label>
+            <input id="preArtifactsFile" type="file" accept=".md,.markdown,.txt">
+          </div>
+          <div class="toolbar-actions">
+            <button class="primary" id="upload">Start questionnaire</button>
+          </div>
+        </div>
+        <div class="stack" id="uxUploadSection" hidden>
+          <div class="toolbar-meta">
+            <label for="uxFrame" style="margin:0">UX/UI form</label>
+            <a class="projection-link" id="uxOpenTab" href="#" target="_blank" rel="noopener">Open full page &#8599;</a>
+          </div>
+          <iframe id="uxFrame" title="UX/UI preparation"></iframe>
+        </div>
+        <div class="toolbar-meta">
+          <div class="review-toolbar-text">You can answer items now, or visualize unresolved areas first. Add the UX/UI form above before working through the questions below. Use Save answer for each field. Unsaved drafts stay in this browser tab across navigation and reloads; they are not included in exports until saved.</div>
+          <div id="sessionMeta" class="status"></div>
+        </div>
+        <div class="toolbar-actions">
+          <div class="toolbar-actions" id="exportActions" hidden>
+            <button id="exportJson">Export JSON</button>
+            <button id="exportMarkdown">Export Markdown</button>
+          </div>
+          <button class="primary" id="visualizeGaps">Visualize gaps</button>
+        </div>
+        <div id="uxResolutionStatus" class="guidance" hidden></div>
       </div>
+      <div class="stack" id="intentReview"></div>
+      <div class="blocker-review" id="blockerReview" hidden></div>
       <div class="queue-tabs" id="queueTabs"></div>
       <div class="stack" id="reviewQueues"></div>
+      <div class="seal-review" id="sealReview" hidden></div>
       <div class="stack" id="projectionArea"></div>
     </section>
   </main>
@@ -87,9 +127,16 @@
     let activeQueue = "needs_answer";
     let focusItemId = "";
     let focusQueueName = "";
+    let pipelineSubmissionInProgress = false;
+    const pendingFinalAttestations = new Set();
+    const answerDrafts = new Map();
+    const answerEditors = new Map();
+    let postQueue = Promise.resolve();
     const labels = {
-      needs_answer: "Needs answer",
-      needs_confirmation: "Needs confirmation",
+      needs_answer: "Needs human answer",
+      needs_confirmation: "Needs human confirmation",
+      repeated_records_pending_review: "Repeated records pending review",
+      current_blocking_decisions: "Current blocking decisions",
       authority_sensitive: "Authority-sensitive",
       evidence_sensitive: "Evidence-sensitive",
       ready_for_quick_review: "Ready"
@@ -97,12 +144,93 @@
 
     function setStatus(text) { document.getElementById("status").textContent = text; }
 
-    async function postJson(url, payload) {
-      const response = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Request failed");
-      return data;
+    function postJson(url, payload) {
+      // Serialize this tab's mutations so older responses cannot replace newer UI state.
+      const request = postQueue.then(async () => {
+        const response = await fetch(url, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Request failed");
+        return data;
+      });
+      postQueue = request.catch(() => {});
+      return request;
     }
+
+    function answerDraftKey(questionId) {
+      return `artpkg-answer-draft:${JSON.stringify([session.session_dir, questionId])}`;
+    }
+
+    function readAnswerDraft(key) {
+      if (!answerDrafts.has(key)) {
+        try {
+          const draft = JSON.parse(sessionStorage.getItem(key));
+          if (draft && typeof draft.value === "string" && typeof draft.state === "string") answerDrafts.set(key, draft);
+        } catch (_) { /* In-memory drafts still work when browser storage is unavailable. */ }
+      }
+      return answerDrafts.get(key);
+    }
+
+    function bindAnswerDraft(item, answerBox, stateSelect, controls) {
+      const key = answerDraftKey(item.id);
+      const notice = appendText(controls, "div", "meta", "");
+      const editors = answerEditors.get(key) || [];
+      editors.push({ answerBox, stateSelect, notice });
+      answerEditors.set(key, editors);
+      function show(draft) {
+        for (const editor of editors) {
+          editor.answerBox.value = draft.value;
+          editor.stateSelect.value = draft.state;
+          editor.notice.textContent = "Unsaved draft — select Save answer.";
+        }
+      }
+      const restored = readAnswerDraft(key);
+      if (restored) show(restored);
+      const changed = () => {
+        const draft = { value:answerBox.value, state:stateSelect.value };
+        answerDrafts.set(key, draft);
+        show(draft);
+        try { sessionStorage.setItem(key, JSON.stringify(draft)); }
+        catch (_) { notice.textContent = "Unsaved draft — browser storage unavailable; save before reloading."; }
+      };
+      answerBox.oninput = changed;
+      answerBox.onchange = changed;
+      stateSelect.onchange = changed;
+    }
+
+    async function saveHumanAnswer(item, answerBox, stateSelect, button) {
+      if (button.disabled) return;
+      const sessionDir = session.session_dir;
+      const key = answerDraftKey(item.id);
+      const sentDraft = readAnswerDraft(key);
+      const value = answerBox.value;
+      const state = stateSelect.value;
+      button.disabled = true;
+      button.textContent = "Saving…";
+      try {
+        const updated = await postJson("/api/session/answer", { session_dir:sessionDir, question_id:item.id, value, state, reviewer:"UI reviewer" });
+        // An edit made while the request was pending is still an unsaved draft.
+        if (answerDrafts.get(key) === sentDraft) {
+          answerDrafts.delete(key);
+          try { sessionStorage.removeItem(key); } catch (_) { /* Storage may be disabled. */ }
+        }
+        if (session.session_dir === sessionDir) {
+          session = updated;
+          syncAfterReview(item.id, "Answer saved");
+        }
+      } catch (error) {
+        setStatus(`Answer failed: ${error.message}. Your draft has been kept; retry Save answer.`);
+      } finally {
+        button.disabled = false;
+        button.textContent = "Save answer";
+      }
+    }
+
+    window.addEventListener("beforeunload", (event) => {
+      if (answerDrafts.size) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    });
 
     function appendText(parent, tag, className, text) {
       const element = document.createElement(tag);
@@ -112,6 +240,12 @@
       return element;
     }
 
+    function humanQuestion(text) {
+      const value = (text || "What answer should ArtPkg use?").trim();
+      if (/[?.!]$/.test(value)) return value;
+      return /^(what|who|which|where|when|why|how|whether)\b/i.test(value) ? `${value}?` : `${value}.`;
+    }
+
     function renderQuestionContext(card, item) {
       const question = item.question || {};
       const source = item.source_context || {};
@@ -119,35 +253,28 @@
       const recommendation = item.state_recommendation || {};
       const guidance = document.createElement("div");
       guidance.className = "guidance";
-      appendText(guidance, "div", "guidance-title", `${question.group || "Questionnaire"} - ${question.answer_type || "Answer"}`);
-      appendText(guidance, "div", "", question.group_description || "Provide enough context to make this package reviewable.");
-      if (recommendation.suggested_state || recommendation.action) {
-        const next = document.createElement("div");
-        next.className = "guidance-block";
-        appendText(next, "strong", "", "Recommended next step");
-        appendText(next, "span", "", `Suggested state: ${recommendation.suggested_state || "Review"}`);
-        appendText(next, "span", "", `Action: ${(recommendation.action || "review_current_answer").replaceAll("_", " ")}`);
-        appendText(next, "span", "", recommendation.reason || "Review this answer before using it for downstream package decisions.");
-        if (recommendation.fallback) appendText(next, "span", "meta", recommendation.fallback);
-        guidance.appendChild(next);
-      }
-      const decision = document.createElement("div");
-      decision.className = "guidance-block";
-      appendText(decision, "strong", "", "You are deciding");
-      appendText(decision, "span", "", question.decision_prompt || "What human-owned answer ArtPkg should use for this package.");
-      guidance.appendChild(decision);
-      if (question.answer_scaffold) {
-        const scaffold = document.createElement("div");
-        scaffold.className = "guidance-block";
-        appendText(scaffold, "strong", "", "How to answer");
-        appendText(scaffold, "pre", "", question.answer_scaffold);
-        guidance.appendChild(scaffold);
-      }
+      appendText(guidance, "div", "guidance-kicker", question.group || "Questionnaire");
+      appendText(guidance, "div", "guidance-title", humanQuestion(question.decision_prompt || question.prompt));
+      appendText(guidance, "div", "", question.meaning || question.group_description || "Provide a specific answer in your own words.");
+      if (question.example) appendText(guidance, "div", "guidance-example", `For example: ${question.example}`);
+      if (source.source_status === "ABSENT") appendText(guidance, "div", "meta", "ArtPkg could not find a clear answer in the uploaded artifact.");
+
+      const technical = document.createElement("details");
+      technical.className = "guidance-details";
+      appendText(technical, "summary", "", "Why ArtPkg is asking and technical details");
       const found = document.createElement("div");
       found.className = "guidance-block";
       appendText(found, "strong", "", "What ArtPkg found");
       appendText(found, "span", "", source.summary || "Review the uploaded source and decide whether this value is truthful.");
-      guidance.appendChild(found);
+      technical.appendChild(found);
+      if (question.answer_scaffold) {
+        const scaffold = document.createElement("div");
+        scaffold.className = "guidance-block";
+        appendText(scaffold, "strong", "", "Optional answer structure");
+        appendText(scaffold, "span", "meta", "Use this only when it helps; a natural-language answer is accepted.");
+        appendText(scaffold, "pre", "", question.answer_scaffold);
+        technical.appendChild(scaffold);
+      }
       if ((question.downstream_effects || []).length) {
         const impact = document.createElement("div");
         impact.className = "guidance-block";
@@ -156,15 +283,23 @@
         list.className = "guidance-list";
         question.downstream_effects.forEach((effect) => appendText(list, "li", "", effect));
         impact.appendChild(list);
-        guidance.appendChild(impact);
+        technical.appendChild(impact);
       }
-      const technical = document.createElement("details");
-      technical.className = "guidance-details";
-      appendText(technical, "summary", "", "Technical details");
+      if (recommendation.suggested_state || recommendation.action) {
+        const next = document.createElement("div");
+        next.className = "guidance-block";
+        appendText(next, "strong", "", "Backend recommendation");
+        appendText(next, "span", "meta", `Suggested state: ${recommendation.suggested_state || "Review"} | Action: ${(recommendation.action || "review_current_answer").replaceAll("_", " ")}`);
+        appendText(next, "span", "", recommendation.reason || "Review this answer before using it for downstream package decisions.");
+        if (recommendation.fallback) appendText(next, "span", "meta", recommendation.fallback);
+        technical.appendChild(next);
+      }
       const sourceBlock = document.createElement("div");
       sourceBlock.className = "guidance-block";
-      appendText(sourceBlock, "strong", "", "Source details");
+      appendText(sourceBlock, "strong", "", "Machine record");
+      appendText(sourceBlock, "span", "meta", `Question ID: ${item.id} | Answer type: ${question.answer_type || "Answer"}`);
       appendText(sourceBlock, "span", "meta", `Answer status: ${source.answer_status || item.state || "UNKNOWN"} | Source status: ${source.source_status || "unknown"} | Source: ${source.source_reference || item.source_reference || "n/a"}`);
+      if (source.source_excerpt) appendText(sourceBlock, "span", "meta", `Source excerpt: ${source.source_excerpt}`);
       if (recommendation.checklist) appendText(sourceBlock, "span", "meta", `Review checklist: ${recommendation.checklist}`);
       technical.appendChild(sourceBlock);
       const confidenceBlock = document.createElement("div");
@@ -173,18 +308,6 @@
       appendText(confidenceBlock, "span", "", confidence.meaning || "Confidence describes source classification, not human approval.");
       appendText(confidenceBlock, "span", "meta", `Score: ${confidence.score ?? item.confidence_score ?? "n/a"} | Label: ${confidence.confidence_label || "n/a"} | Basis: ${confidence.basis || "n/a"}`);
       technical.appendChild(confidenceBlock);
-      const meaning = document.createElement("div");
-      meaning.className = "guidance-block";
-      appendText(meaning, "strong", "", "Question definition");
-      appendText(meaning, "span", "", question.meaning || "Answer this explicitly, or mark it unknown/deferred when that is truthful.");
-      technical.appendChild(meaning);
-      if (question.example) {
-        const example = document.createElement("div");
-        example.className = "guidance-row";
-        appendText(example, "strong", "", "Example");
-        appendText(example, "span", "", question.example);
-        technical.appendChild(example);
-      }
       if ((question.choices || []).length) {
         appendText(technical, "div", "meta", `Allowed choices: ${question.choices.join(", ")}`);
       }
@@ -194,9 +317,9 @@
 
     function answerSummary(item) {
       const source = item.source_context || {};
-      const missing = source.source_status === "missing_in_source" || ["UNKNOWN", "DEFERRED", "TO_BE_INSPECTED"].includes(item.state || "");
-      const status = missing ? "Missing answer" : "Seeded answer";
-      const finding = source.source_status === "missing_in_source" ? "no explicit source answer found" : "seeded from uploaded source";
+      const missing = source.source_status === "ABSENT";
+      const status = missing ? "Missing answer" : item.state === "UNKNOWN" ? "Unresolved source answer" : "Seeded answer";
+      const finding = missing ? "no explicit source answer found" : source.source_status === "CONFLICTED" ? "conflicting source answers found" : "source evidence found";
       return `${item.reason || ""} | Status: ${status} | Source finding: ${finding}`;
     }
 
@@ -231,17 +354,538 @@
       return action === "confirm" ? "/api/session/confirm" : "/api/session/reject";
     }
 
+    function queueContaining(itemId) {
+      if (!itemId || !session) return "";
+      return Object.keys(labels).find((name) =>
+        (session.review_queues[name] || []).some((item) => item.id === itemId)
+      ) || "";
+    }
+
+    function markProjectionStale() {
+      const area = document.getElementById("projectionArea");
+      if (!area.childElementCount) return;
+      area.innerHTML = "";
+      const card = document.createElement("article");
+      card.className = "card";
+      appendText(card, "strong", "", "Visualization needs refresh");
+      appendText(card, "div", "meta", "Review answers changed. Select Visualize gaps again to rebuild the readiness view.");
+      area.appendChild(card);
+    }
+
+    function syncAfterReview(itemId, message) {
+      const currentQueue = queueContaining(itemId);
+      focusItemId = "";
+      focusQueueName = "";
+      markProjectionStale();
+      if (currentQueue) {
+        activeQueue = currentQueue;
+        setStatus(`${message}; now in ${labels[currentQueue]}`);
+      } else {
+        setStatus(`${message}; resolved and no longer in a review queue`);
+      }
+      render();
+    }
+
+    function sealField(parent, label, value) {
+      const field = document.createElement("div");
+      field.className = "seal-field";
+      appendText(field, "strong", "", label);
+      appendText(field, "span", "meta", value ?? "Not available");
+      parent.appendChild(field);
+    }
+
+    function sealList(parent, label, values, emptyText) {
+      const field = document.createElement("div");
+      field.className = "seal-field";
+      appendText(field, "strong", "", label);
+      const list = document.createElement("ul");
+      list.className = "seal-list";
+      (values?.length ? values : [emptyText]).forEach((value) => appendText(list, "li", "meta", value));
+      field.appendChild(list);
+      parent.appendChild(field);
+    }
+
+    function sealResolvableList(parent, label, values, emptyText) {
+      const field = document.createElement("div");
+      field.className = "seal-field";
+      appendText(field, "strong", "", label);
+      const list = document.createElement("ul");
+      list.className = "seal-list";
+      (values?.length ? values : [emptyText]).forEach((value) => {
+        const item = document.createElement("li");
+        item.className = "meta";
+        const blockerIds = [...new Set([
+          ...(session?.sealing?.unanswered_questions || []),
+          ...(session?.review_queues?.current_blocking_decisions || []).map((blocker) => blocker.id)
+        ])];
+        const finding = String(value);
+        const matchedIds = blockerIds.filter((id) => finding.includes(id)
+          || (finding.includes("FIN-001..FIN-003") && /^FIN-00[123]$/.test(id)));
+        if (!matchedIds.length) {
+          item.textContent = value;
+        } else {
+          item.append(`${value} `);
+          matchedIds.forEach((id, index) => {
+            if (index) item.append(" ");
+            const link = document.createElement("a");
+            link.className = "blocker-link";
+            link.href = `#blocker-${id}`;
+            link.textContent = `Resolve ${id}`;
+            item.appendChild(link);
+          });
+        }
+        list.appendChild(item);
+      });
+      field.appendChild(list);
+      parent.appendChild(field);
+    }
+
+    function reviewItemFor(questionId) {
+      for (const queue of Object.values(session?.review_queues || {})) {
+        const item = queue.find((candidate) => candidate.id === questionId && candidate.kind === "answer");
+        if (item) return item;
+      }
+      return null;
+    }
+
+    function humanAnswerInput(item) {
+      const choices = item.question?.choices || [];
+      const answerType = item.question?.answer_type;
+      if (choices.length && ["BOOLEAN", "ENUM"].includes(answerType)) {
+        const select = document.createElement("select");
+        const currentValue = typeof item.value === "string" && item.value !== "UNKNOWN" ? item.value : "";
+        const prompt = document.createElement("option");
+        prompt.value = "";
+        prompt.textContent = "Select an answer";
+        prompt.disabled = true;
+        prompt.selected = !currentValue;
+        select.appendChild(prompt);
+        choices.forEach((choice) => {
+          const option = document.createElement("option");
+          option.value = choice;
+          option.textContent = choice;
+          option.selected = choice === currentValue;
+          select.appendChild(option);
+        });
+        return select;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = typeof item.value === "string" && item.value !== "UNKNOWN" ? item.value : "";
+      textarea.placeholder = item.question?.example ? `Answer in your own words. For example: ${item.question.example}` : "Answer in your own words";
+      return textarea;
+    }
+
+    function renderBlockingReview() {
+      const area = document.getElementById("blockerReview");
+      area.innerHTML = "";
+      const blockersById = new Map((session?.review_queues?.current_blocking_decisions || []).map((blocker) => [blocker.id, blocker]));
+      (session?.sealing?.unanswered_questions || []).forEach((questionId) => {
+        const item = reviewItemFor(questionId);
+        if (!blockersById.has(questionId)) blockersById.set(questionId, { id:questionId, label:item?.label || questionId });
+      });
+      const blockers = [...blockersById.values()];
+      area.hidden = blockers.length === 0;
+      if (!blockers.length) return;
+
+      appendText(area, "h2", "", "Resolve before sealing");
+      appendText(area, "div", "meta", "These are the remaining inputs that currently prevent an immutable package from being sealed.");
+      blockers.filter((blocker) => !blocker.id.startsWith("FIN-")).forEach((blocker) => {
+        const item = reviewItemFor(blocker.id);
+        const card = document.createElement("article");
+        card.className = "card";
+        card.id = `blocker-${blocker.id}`;
+        appendText(card, "strong", "", blocker.label || blocker.id);
+        appendText(card, "div", "meta", `${blocker.id} - acceptance-blocking answer`);
+        if (item) {
+          renderQuestionContext(card, item);
+          const controls = document.createElement("div");
+          controls.className = "answer-controls";
+          const answerWrap = document.createElement("div");
+          appendText(answerWrap, "label", "", "Human answer");
+          const answerBox = humanAnswerInput(item);
+          answerWrap.appendChild(answerBox);
+          const stateWrap = document.createElement("div");
+          appendText(stateWrap, "label", "", "Answer availability");
+          const stateSelect = document.createElement("select");
+          [["PROVIDED", "Answered"], ["UNKNOWN", "I don't know"], ["DEFERRED", "Decide later"], ["TO_BE_INSPECTED", "I need to check first"], ["NOT_APPLICABLE", "Does not apply"]].forEach(([value, label]) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            option.selected = value === (item.state === "UNKNOWN" ? "PROVIDED" : item.state || "PROVIDED");
+            stateSelect.appendChild(option);
+          });
+          stateWrap.appendChild(stateSelect);
+          const save = document.createElement("button");
+          save.textContent = "Save answer";
+          save.onclick = () => saveHumanAnswer(item, answerBox, stateSelect, save);
+          controls.append(answerWrap, stateWrap, save);
+          bindAnswerDraft(item, answerBox, stateSelect, controls);
+          card.appendChild(controls);
+        } else {
+          appendText(card, "div", "meta", "Complete the prerequisite review items before recording this decision.");
+        }
+        area.appendChild(card);
+      });
+
+      const finalBlockers = blockers.filter((blocker) => blocker.id.startsWith("FIN-"));
+      if (finalBlockers.length) {
+        const card = document.createElement("article");
+        card.className = "card";
+        card.id = "final-attestations";
+        appendText(card, "strong", "", "Final external-assessment review");
+        appendText(card, "div", "meta", "Select all three attestations to record this final review. Any remaining validation issues will continue to block sealing.");
+        const attestations = session.sealing?.final_attestations || {};
+        const confirmations = [["The package is complete enough for external assessment.", "FIN-001"], ["Secrets and sensitive-content handling have been reviewed.", "FIN-002"], ["This package grants no implementation authority; authority remains NONE.", "FIN-003"]];
+        const checks = confirmations.map(([labelText, qid]) => {
+          const label = document.createElement("label");
+          label.className = "check";
+          label.id = `blocker-${qid}`;
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = attestations[qid] === "YES" || pendingFinalAttestations.has(qid);
+          checkbox.onchange = () => {
+            if (checkbox.checked) pendingFinalAttestations.add(qid);
+            else pendingFinalAttestations.delete(qid);
+            recordReview.disabled = !checks.every((item) => item.checked);
+          };
+          label.appendChild(checkbox);
+          appendText(label, "span", "", `${qid}: ${labelText}`);
+          card.appendChild(label);
+          return checkbox;
+        });
+        const recordReview = document.createElement("button");
+        recordReview.textContent = "Record final assessment attestations";
+        recordReview.disabled = !checks.every((checkbox) => checkbox.checked);
+        recordReview.onclick = async () => {
+          try {
+            setStatus("Recording final assessment attestations");
+            for (const [questionId, value] of [["AUT-001", "NONE"], ["FIN-001", "YES"], ["FIN-002", "YES"], ["FIN-003", "YES"]]) {
+              session = await postJson("/api/session/answer", { session_dir:session.session_dir, question_id:questionId, value, state:"PROVIDED" });
+            }
+            pendingFinalAttestations.clear();
+            setStatus("Final assessment attestations recorded");
+            render();
+          } catch (error) { setStatus(`Final review failed: ${error.message}`); }
+        };
+        card.appendChild(recordReview);
+        area.appendChild(card);
+      }
+    }
+
+    function renderDshReview(area) {
+      const dsh = session.dsh_handoff || {available:false, unmet_conditions:["DSH bridge is unavailable."]};
+      const card = document.createElement("div");
+      card.className = "guidance";
+      appendText(card, "h3", "", "DSH advisory semantic review");
+      appendText(card, "p", "meta", "Review coherence, contradictions, missing requirements, and acceptance criteria. Implementation authority: NONE. Model output requires human review.");
+      if (!dsh.available) {
+        sealList(card, "Setup required", dsh.unmet_conditions, "DSH is unavailable");
+        const disabled = document.createElement("button");
+        disabled.textContent = "Send to DSH";
+        disabled.disabled = true;
+        card.appendChild(disabled);
+      } else if (dsh.result) {
+        const record = dsh.result;
+        sealField(card, "Delivery status", record.status);
+        sealField(card, "DSH session ID", record.dsh_session_id);
+        sealField(card, "Model", `${record.provider} / ${record.model}`);
+        sealField(card, "Assessment status", "NOT_VERIFIED — advisory only");
+        if (["SESSION_PREPARING", "SESSION_CREATED"].includes(record.status)) {
+          const resume = document.createElement("button");
+          resume.textContent = "Resume prepared DSH handoff";
+          resume.onclick = async () => {
+            resume.disabled = true;
+            try {
+              session = await postJson("/api/session/dsh-send", {session_dir:session.session_dir, confirmation:dsh.confirmation});
+              render();
+            } catch (error) {
+              setStatus(`DSH handoff: ${error.message}`);
+              resume.disabled = false;
+            }
+          };
+          card.appendChild(resume);
+        }
+        if (["DELIVERY_UNCERTAIN", "PROMPT_DISPATCHING"].includes(record.status)) {
+          appendText(card, "p", "warning", "Delivery is uncertain. Automatic resend is disabled to prevent duplicate review prompts. Check DSH history before any manual recovery.");
+        }
+        const link = document.createElement("a");
+        link.className = "projection-link";
+        link.href = record.chat_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Open DSH";
+        card.appendChild(link);
+        appendText(card, "p", "meta", "DSH opens in a separate tab and may require login. Select the session ID above; this DSH version has no session deep links. ArtPkg retains the handoff status.");
+        const refresh = document.createElement("button");
+        refresh.textContent = "Read initial review transcript";
+        const output = document.createElement("div");
+        refresh.onclick = async () => {
+          refresh.disabled = true;
+          output.replaceChildren();
+          try {
+            const history = await postJson("/api/session/dsh-transcript", {session_dir:session.session_dir});
+            appendText(output, "p", "meta", history.notice);
+            for (const message of history.messages || []) appendText(output, "pre", "value", message.text);
+            if (!history.messages?.length) appendText(output, "p", "", "No bound review response is visible in this cached history yet.");
+          } catch (error) {
+            appendText(output, "p", "warning", error.message);
+          } finally { refresh.disabled = false; }
+        };
+        card.append(refresh, output);
+      } else {
+        sealField(card, "Configured model destination", `${dsh.provider} / ${dsh.model}`);
+        appendText(card, "p", "meta", "The DSH host is local; the configured model provider may be remote. Sending shares the sealed package text with that provider.");
+        const label = document.createElement("label");
+        label.className = "check";
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        label.appendChild(check);
+        appendText(label, "span", "", dsh.confirmation);
+        const send = document.createElement("button");
+        send.className = "primary";
+        send.textContent = "Send to DSH";
+        send.disabled = true;
+        check.onchange = () => { send.disabled = !check.checked; };
+        send.onclick = async () => {
+          send.disabled = true;
+          check.disabled = true;
+          try {
+            session = await postJson("/api/session/dsh-send", {session_dir:session.session_dir, confirmation:dsh.confirmation});
+            setStatus("DSH handoff recorded; semantic assessment remains advisory");
+            render();
+          } catch (error) {
+            setStatus(`DSH handoff: ${error.message}`);
+            check.disabled = false;
+            check.checked = false;
+          }
+        };
+        card.append(label, send);
+      }
+      area.appendChild(card);
+    }
+
+    function renderSealing() {
+      const container = document.getElementById("sealReview");
+      container.innerHTML = "";
+      const sealing = session?.sealing;
+      container.hidden = !sealing;
+      if (!sealing) return;
+      appendText(container, "h2", "", "Next: final review → DSH coding workspace");
+      appendText(container, "p", "", "Answer questions → Review final package → Seal and admit → Prepare coding workspace → Continue in DSH.");
+      appendText(container, "p", "meta", "Use the final review workflow below for coding. It carries the reviewed package, source evidence and suggested prompts into DSH. An existing seal alone is not the completed coding handoff.");
+      const finalReview = document.createElement("a");
+      finalReview.className = "projection-link";
+      finalReview.textContent = "Continue to final review & coding handoff →";
+      finalReview.href = `/review?dir=${encodeURIComponent(session.session_dir)}`;
+      container.appendChild(finalReview);
+      const area = document.createElement("details");
+      appendText(area, "summary", "", "Advanced: admission details, sealed download & optional advisory review (not the coding workflow)");
+      container.appendChild(area);
+      appendText(area, "p", "meta", "Download Sealed Package is an archive only: it does not prepare a coding workspace. The advisory Send to DSH/Open DSH actions below use the separate no-tools reviewer, not the coding session.");
+      const grid = document.createElement("div");
+      grid.className = "seal-grid";
+      sealField(grid, "Completion result", sealing.completion_result);
+      sealField(grid, "Package ID", sealing.package_id);
+      sealField(grid, "Package version", sealing.package_version);
+      sealField(grid, "Submission ID", sealing.submission_id);
+      sealField(grid, "Package SHA-256", sealing.package_sha256);
+      sealField(grid, "Content-set SHA-256", sealing.content_set_sha256);
+      sealField(grid, "Target binding", sealing.target_binding === null ? "Not bound" : JSON.stringify(sealing.target_binding));
+      sealField(grid, "Source classification", sealing.source_classification);
+      sealField(grid, "Implementation authority", sealing.implementation_authority || "Not established");
+      area.appendChild(grid);
+      const findings = document.createElement("div");
+      findings.className = "seal-grid";
+      sealResolvableList(findings, "Unanswered questions", sealing.unanswered_questions, "None");
+      sealList(findings, "Explicitly deferred questions", sealing.explicitly_deferred_questions, "None");
+      sealResolvableList(findings, "Validation blockers", sealing.seal_blockers, "None");
+      sealList(findings, "Validation warnings", sealing.validation_warnings, "None");
+      sealList(findings, "Exact export inventory", sealing.inventory, "Available after completion");
+      const pipeline = session.pipeline_admission || { available:false, eligible:false, unmet_conditions:["Pipeline-A admission configuration is unavailable."] };
+      sealList(findings, "Pipeline-A admission requirements", pipeline.unmet_conditions, "All deterministic sealing and admission requirements are satisfied");
+      area.appendChild(findings);
+
+      const admission = pipeline.result;
+      if (admission) {
+        const result = document.createElement("div");
+        result.className = "guidance";
+        appendText(result, "strong", "", "Package admitted");
+        appendText(result, "div", "value", admission.sdlc_status === "STRUCTURE_VALID" ? "Structural validation complete" : admission.sdlc_status);
+        appendText(result, "div", "meta", admission.next_action === "SEMANTIC_ASSESSMENT_NOT_IMPLEMENTED" ? "Semantic assessment is not implemented" : admission.next_action);
+        appendText(result, "div", "meta", `Implementation authority: ${admission.implementation_authority}`);
+        const progress = document.createElement("div");
+        progress.className = "pipeline-progress";
+        [
+          ["ArtPkg", "Package sealed", `${admission.package_id} v${admission.package_version}`, "complete"],
+          ["Pipeline-A", "Admission accepted", admission.custody_id, "complete"],
+          ["SDLC Harness", "Phase 1 complete", admission.sdlc_status === "STRUCTURE_VALID" ? "Structural validation passed" : admission.sdlc_status, "complete"],
+          ["Next boundary", "Semantic assessment", admission.next_action === "SEMANTIC_ASSESSMENT_NOT_IMPLEMENTED" ? "Not implemented" : admission.next_action, "pending"]
+        ].forEach(([system, title, detail, state]) => {
+          const step = document.createElement("div");
+          step.className = "pipeline-step";
+          appendText(step, "span", `pipeline-state${state === "pending" ? " pending" : ""}`, state);
+          appendText(step, "strong", "", system);
+          appendText(step, "span", "", title);
+          appendText(step, "span", "meta", detail);
+          progress.appendChild(step);
+        });
+        result.appendChild(progress);
+        [
+          ["Admission status", admission.admission_status], ["SDLC status", admission.sdlc_status],
+          ["Progress status", admission.progress_status], ["Package", `${admission.package_id} v${admission.package_version}`],
+          ["Submission ID", admission.submission_id], ["Custody ID", admission.custody_id],
+          ["Handoff ID", admission.handoff_id], ["Invocation ID", admission.invocation_id],
+          ["Assessment ID", admission.assessment_id], ["Receipt ID", admission.receipt_id],
+          ["Next action", admission.next_action]
+        ].forEach(([label, value]) => sealField(result, label, value));
+        area.appendChild(result);
+      }
+
+      if (admission?.admission_status === "ACCEPTED") {
+        const completed = document.createElement("div");
+        completed.className = "guidance";
+        appendText(completed, "strong", "", "Pipeline-A handoff complete");
+        appendText(completed, "div", "", "The immutable package is in Pipeline-A custody and SDLC Harness Phase 1 structural validation is complete.");
+        appendText(completed, "div", "meta", `Durable receipt: ${admission.receipt_id}`);
+        appendText(completed, "div", "meta", "The Phase 1 receipt is unchanged. DSH advisory review is a separate handoff, not authorization to implement.");
+        area.appendChild(completed);
+        renderDshReview(area);
+      } else if (sealing.completion_result === "READY_TO_SEAL") {
+        const legacy = document.createElement("details");
+        appendText(legacy, "summary", "", "Legacy: seal for assessment only (without final coding review)");
+        appendText(legacy, "p", "meta", "For coding, use Continue to final review & coding handoff above instead. This assessment-only path will require a reviewed revision later.");
+        area.appendChild(legacy);
+        const confirmation = document.createElement("label");
+        confirmation.className = "check";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        const text = document.createElement("span");
+        text.className = "seal-confirmation";
+        text.textContent = sealing.confirmation_text;
+        confirmation.appendChild(checkbox);
+        confirmation.appendChild(text);
+        legacy.appendChild(confirmation);
+        const sealButton = document.createElement("button");
+        sealButton.className = "primary";
+        sealButton.textContent = "Seal Package for Pipeline-A";
+        sealButton.disabled = true;
+        checkbox.onchange = () => {
+          sealButton.disabled = !checkbox.checked || !pipeline.eligible || pipelineSubmissionInProgress;
+        };
+        sealButton.onclick = async () => {
+          if (pipelineSubmissionInProgress) return;
+          pipelineSubmissionInProgress = true;
+          sealButton.disabled = true;
+          try {
+            setStatus("Sealing immutable package and submitting to Pipeline-A");
+            session = await postJson("/api/session/seal", {
+              session_dir:session.session_dir,
+              reviewed:true,
+              confirmation:sealing.confirmation_text,
+              target_binding:sealing.target_binding
+            });
+            setStatus("Package admitted; structural validation complete");
+            render();
+          } catch (error) {
+            setStatus(`Pipeline-A admission failed: ${error.message}`);
+          } finally {
+            pipelineSubmissionInProgress = false;
+            if (!session?.pipeline_admission?.result) render();
+          }
+        };
+        if (!pipeline.eligible) {
+          sealButton.title = (pipeline.unmet_conditions || []).join("; ");
+        }
+        legacy.appendChild(sealButton);
+      } else if (!sealing.sealed) {
+        const blockedSealButton = document.createElement("button");
+        blockedSealButton.className = "primary";
+        blockedSealButton.textContent = "Seal Package for Pipeline-A";
+        blockedSealButton.disabled = true;
+        blockedSealButton.title = "Resolve the validation blockers listed above before sealing.";
+        area.appendChild(blockedSealButton);
+      }
+
+      const sealedId = session.sealed_package?.sealed_id || (sealing.sealed ? sealing.sealed_id : null);
+      if (sealedId) {
+        const download = document.createElement("a");
+        download.className = "projection-link";
+        download.textContent = "Download Sealed Package";
+        download.href = `/api/session/sealed-download?dir=${encodeURIComponent(session.session_dir)}&sealed=${encodeURIComponent(sealedId)}`;
+        area.appendChild(download);
+      }
+    }
+
+    function updateUxFrame() {
+      const section = document.getElementById("uxUploadSection");
+      const frame = document.getElementById("uxFrame");
+      const openTab = document.getElementById("uxOpenTab");
+      if (!session || !session.session_dir) { section.hidden = true; return; }
+      const url = "/ux?" + new URLSearchParams({dir: session.session_dir});
+      section.hidden = false;
+      openTab.href = url;
+      if (frame.dataset.dir !== session.session_dir) {
+        frame.src = url;
+        frame.dataset.dir = session.session_dir;
+      }
+    }
+
     function render() {
       if (!session) return;
-      if (focusQueueName && session.review_queues[focusQueueName]) activeQueue = focusQueueName;
+      answerEditors.clear();
       document.getElementById("sessionMeta").textContent = `Session: ${session.session_id}`;
+      updateUxFrame();
+      const uxStatus = document.getElementById("uxResolutionStatus");
+      uxStatus.replaceChildren();
+      uxStatus.hidden = !session.ux_resolution?.answers || Object.values(session.ux_resolution.answers).every((value) => !value);
+      if (!uxStatus.hidden) {
+        appendText(uxStatus, "strong", "", session.ux_resolution.complete ? "UX/UI decisions recorded" : "UX/UI decisions partially recorded");
+        appendText(uxStatus, "div", "", session.ux_resolution.complete
+          ? "Review the updated source below, then use Continue to final review & coding handoff. A fresh UX/UI snapshot and proposal are required before wireframe generation."
+          : `Still undecided: ${session.ux_resolution.undecided.join(", ")}. Resolve these before treating UX preparation as complete.`);
+        appendText(uxStatus, "div", "meta", "These answers update the ArtPkg source; they do not grant UX approval or implementation authority.");
+      }
+      document.getElementById("exportActions").hidden = false;
+      const intentArea = document.getElementById("intentReview");
+      intentArea.innerHTML = "";
+      const intent = session.review_summary?.intent_summary;
+      if (intent) {
+        const card = document.createElement("article");
+        card.className = "card";
+        appendText(card, "strong", "", "Intent summary");
+        [["Problem", intent.problem], ["Observable outcome", intent.observable_outcome], ["Primary user or use case", intent.primary_user_or_use_case], ["In scope", intent.in_scope], ["Out of scope", intent.out_of_scope], ["Important limitations", intent.important_limitations]].forEach(([label, value]) => {
+          if (value) appendText(card, "div", "value", `${label}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+        });
+        appendText(card, "div", "meta", intent.authority_effect);
+        if (intent.review) {
+          appendText(card, "div", "meta", `${intent.review.action} recorded by ${intent.review.reviewer} at ${intent.review.timestamp}`);
+        }
+        const actions = document.createElement("div"); actions.className = "actions";
+        (intent.actions || []).forEach((action) => {
+          const button = document.createElement("button"); button.textContent = action;
+          button.disabled = intent.review?.action === action;
+          button.onclick = async () => {
+            try { session = await postJson("/api/session/intent-summary", { session_dir:session.session_dir, action }); setStatus(`Intent summary: ${action}`); render(); }
+            catch (error) { setStatus(`Intent review failed: ${error.message}`); }
+          };
+          actions.appendChild(button);
+        });
+        card.appendChild(actions); intentArea.appendChild(card);
+      }
+      renderBlockingReview();
       const tabs = document.getElementById("queueTabs");
       tabs.innerHTML = "";
       Object.keys(labels).forEach((name) => {
         const button = document.createElement("button");
         button.textContent = `${labels[name]} (${session.queue_counts[name] || 0})`;
         button.setAttribute("aria-pressed", String(activeQueue === name));
-        button.onclick = () => { activeQueue = name; render(); };
+        button.onclick = () => {
+          activeQueue = name;
+          focusItemId = "";
+          focusQueueName = "";
+          setStatus(`Viewing ${labels[name]}`);
+          render();
+        };
         tabs.appendChild(button);
       });
 
@@ -252,28 +896,41 @@
         card.className = "card";
         const matchesFocus = focusItemId && (item.id === focusItemId || item.section === focusItemId || item.label === focusItemId);
         if (matchesFocus) card.setAttribute("data-focus-match", "true");
-        appendText(card, "strong", "", `${item.id} ${item.label || ""}`);
-        appendText(card, "div", "meta", item.kind === "answer" ? answerSummary(item) : `${item.reason || ""} | ${item.state || ""} | ${item.source_type || ""}`);
+        appendText(card, "strong", "", item.label || item.id);
+        appendText(card, "div", "meta", item.kind === "answer" ? (answerSummary(item).includes("Missing answer") ? "Needs a human answer" : "Review the answer found in the uploaded artifact") : `${item.reason || ""} | ${item.state || ""} | ${item.source_type || ""}`);
         if (item.kind === "answer") renderQuestionContext(card, item);
         if (item.kind === "record") renderRecordContext(card, item);
-        appendText(card, "div", "value", typeof item.value === "string" ? item.value : JSON.stringify(item.value, null, 2));
+        if (item.kind === "record_section") {
+          appendText(card, "div", "meta", `${item.count} seeded records. IDs and source statuses are preserved.`);
+          renderRecordContext(card, item);
+          const details = document.createElement("details");
+          appendText(details, "summary", "", "Inspect records");
+          appendText(details, "pre", "", JSON.stringify(item.records || [], null, 2));
+          card.appendChild(details);
+        }
+        if (item.kind !== "answer") appendText(card, "div", "value", typeof item.value === "string" ? item.value : JSON.stringify(item.value, null, 2));
 
         if (item.kind === "answer") {
           const controls = document.createElement("div");
           controls.className = "answer-controls";
           const answerWrap = document.createElement("div");
           appendText(answerWrap, "label", "", "Human answer");
-          const answerBox = document.createElement("textarea");
-          answerBox.value = typeof item.value === "string" && item.value !== "UNKNOWN" ? item.value : "";
-          answerBox.placeholder = "Human answer";
+          const answerBox = humanAnswerInput(item);
           answerWrap.appendChild(answerBox);
           const stateWrap = document.createElement("div");
-          appendText(stateWrap, "label", "", "Answer state");
+          appendText(stateWrap, "label", "", "Answer availability");
           const stateSelect = document.createElement("select");
-          ["PROVIDED", "UNKNOWN", "DEFERRED", "TO_BE_INSPECTED", "NOT_APPLICABLE"].forEach((state) => {
+          const stateLabels = {
+            PROVIDED:"Answered",
+            UNKNOWN:"I don't know",
+            DEFERRED:"Decide later",
+            TO_BE_INSPECTED:"I need to check first",
+            NOT_APPLICABLE:"Does not apply"
+          };
+          Object.entries(stateLabels).forEach(([state, label]) => {
             const option = document.createElement("option");
             option.value = state;
-            option.textContent = state;
+            option.textContent = label;
             option.selected = state === (item.state === "UNKNOWN" ? "PROVIDED" : item.state || "PROVIDED");
             stateSelect.appendChild(option);
           });
@@ -281,41 +938,78 @@
           const answerButton = document.createElement("button");
           answerButton.dataset.action = "answer";
           answerButton.textContent = "Save answer";
-          answerButton.onclick = async () => {
-            try {
-              session = await postJson("/api/session/answer", {
-                session_dir:session.session_dir,
-                question_id:item.id,
-                value:answerBox.value,
-                state:stateSelect.value,
-                reviewer:"UI reviewer"
-              });
-              setStatus("Answer saved");
-              render();
-            } catch (error) {
-              setStatus(`Answer failed: ${error.message}`);
-            }
-          };
+          answerButton.onclick = () => saveHumanAnswer(item, answerBox, stateSelect, answerButton);
           controls.appendChild(answerWrap);
           controls.appendChild(stateWrap);
           controls.appendChild(answerButton);
+          bindAnswerDraft(item, answerBox, stateSelect, controls);
           card.appendChild(controls);
         }
 
         const actions = document.createElement("div");
         actions.className = "actions";
-        const confirmButton = document.createElement("button");
-        confirmButton.dataset.action = "confirm";
-        confirmButton.textContent = "Confirm";
-        confirmButton.onclick = async () => {
-          try {
-            session = await postJson(actionUrl(item, "confirm"), actionPayload(item));
-            setStatus(`${item.kind === "record" ? "Record" : "Answer"} confirmed`);
-            render();
-          } catch (error) {
-            setStatus(`Confirm failed: ${error.message}`);
+        if (item.kind === "record") {
+          const confirmButton = document.createElement("button");
+          confirmButton.dataset.action = "confirm";
+          confirmButton.textContent = "Confirm";
+          confirmButton.onclick = async () => {
+            try {
+              session = await postJson(actionUrl(item, "confirm"), actionPayload(item));
+              syncAfterReview(item.id, "Record confirmed");
+            } catch (error) {
+              setStatus(`Confirm failed: ${error.message}`);
+            }
+          };
+          actions.appendChild(confirmButton);
+
+          const statusField = (item.record_schema || []).find(
+            (field) => (field.name === "status" || field.name === "residual_status") && (field.choices || []).length
+          );
+          if (statusField) {
+            const statusWrap = document.createElement("div");
+            appendText(statusWrap, "label", "", statusField.label);
+            const statusSelect = document.createElement("select");
+            const currentStatus = (item.value || {})[statusField.name];
+            statusField.choices.forEach((choice) => {
+              const option = document.createElement("option");
+              option.value = choice;
+              option.textContent = choice;
+              option.selected = choice === currentStatus;
+              statusSelect.appendChild(option);
+            });
+            statusWrap.appendChild(statusSelect);
+            const statusButton = document.createElement("button");
+            statusButton.dataset.action = "advance-status";
+            statusButton.textContent = "Advance status";
+            statusButton.onclick = async () => {
+              try {
+                session = await postJson("/api/session/record/advance-status", {
+                  session_dir: session.session_dir,
+                  record_id: item.id,
+                  target_status: statusSelect.value,
+                  reviewer: "UI reviewer",
+                });
+                syncAfterReview(item.id, `Status set to ${statusSelect.value}`);
+              } catch (error) {
+                setStatus(`Advance status failed: ${error.message}`);
+              }
+            };
+            actions.appendChild(statusWrap);
+            actions.appendChild(statusButton);
           }
-        };
+        }
+        if (item.kind === "record_section") {
+          const confirmSection = document.createElement("button");
+          confirmSection.textContent = "Accept section";
+          confirmSection.onclick = async () => {
+            try {
+              session = await postJson("/api/session/record-section/confirm", { session_dir:session.session_dir, section:item.section });
+              syncAfterReview(item.id, "Record section accepted");
+            } catch (error) { setStatus(`Section review failed: ${error.message}`); }
+          };
+          actions.appendChild(confirmSection);
+        }
+        if (item.kind === "answer" || item.kind === "record") {
         const rejectButton = document.createElement("button");
         rejectButton.dataset.action = "reject";
         rejectButton.className = "danger";
@@ -324,21 +1018,95 @@
           const reason = prompt("Why is this seeded item rejected?") || "Rejected in UI";
           try {
             session = await postJson(actionUrl(item, "reject"), { ...actionPayload(item), reason });
-            setStatus(`${item.kind === "record" ? "Record" : "Answer"} rejected`);
-            render();
+            syncAfterReview(item.id, `${item.kind === "record" ? "Record" : "Answer"} rejected`);
           } catch (error) {
             setStatus(`Reject failed: ${error.message}`);
           }
         };
-        actions.appendChild(confirmButton);
         actions.appendChild(rejectButton);
+        }
         card.appendChild(actions);
         list.appendChild(card);
         if (matchesFocus) {
           setTimeout(() => card.scrollIntoView({ behavior:"smooth", block:"center" }), 0);
         }
       });
+      renderSealing();
     }
+
+    function activeHumanWork() {
+      const names = ["needs_answer", "needs_confirmation", "repeated_records_pending_review", "current_blocking_decisions"];
+      return names.flatMap((name) => (session?.review_queues?.[name] || []).map((item) => ({ ...item, queue:name })));
+    }
+
+    function downloadExport(extension, content, contentType) {
+      const blob = new Blob([content], { type:contentType });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${session.session_id}-unanswered-questions.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    }
+
+    function exportUnansweredJson() {
+      const questions = activeHumanWork();
+      downloadExport("json", JSON.stringify({
+        session_id:session.session_id,
+        exported_at:new Date().toISOString(),
+        human_work_counts:session.human_work_counts,
+        active_work_count:questions.length,
+        active_work:questions
+      }, null, 2), "application/json");
+      setStatus(`Exported ${questions.length} unanswered questions as JSON`);
+    }
+
+    function exportUnansweredMarkdown() {
+      const questions = activeHumanWork();
+      const lines = [
+        "# ArtPkg Active Human Work",
+        "",
+        `Session: ${session.session_id}`,
+        `Needs human answer: ${session.human_work_counts?.needs_human_answer || 0}`,
+        `Needs human confirmation: ${session.human_work_counts?.needs_human_confirmation || 0}`,
+        `Repeated records pending review: ${session.human_work_counts?.repeated_records_pending_review || 0}`,
+        `Current blocking decisions: ${session.human_work_counts?.current_blocking_decisions || 0}`,
+        `Final attestations remaining: ${session.human_work_counts?.final_attestations_remaining || 0}`,
+        `Deferred to later phase: ${session.human_work_counts?.deferred_to_later_phase || 0}`,
+        `Not applicable: ${session.human_work_counts?.not_applicable || 0}`,
+        `Suppressed: ${session.human_work_counts?.suppressed || 0}`,
+        `Ready to seal: ${session.human_work_counts?.ready_to_seal ? "YES" : "NO"}`,
+        ""
+      ];
+      questions.forEach((item) => {
+        lines.push(
+          `## ${item.id}: ${item.label || item.question?.prompt || "Question"}`,
+          "",
+          `- Answer state: ${item.state || "UNKNOWN"}`,
+          `- Source status: ${item.source_status || item.source_context?.source_status || "ABSENT"}`,
+          `- Source reference: ${item.source_reference || "Not found"}`,
+          `- Applicability: ${item.applicability || "CURRENT"}`,
+          `- Review priority: ${item.review_priority || "UNSPECIFIED"}`,
+          `- Human response reason: ${item.human_response_reason || item.reason || "Review required"}`,
+          "",
+          `**Why this needs an answer:** ${item.reason || "No answer is currently available."}`,
+          "",
+          `**What ArtPkg found:** ${item.source_context?.summary || "No explicit source answer found."}`,
+          "",
+          "**Answer:**",
+          "",
+          "",
+          "---",
+          ""
+        );
+      });
+      downloadExport("md", lines.join("\n"), "text/markdown");
+      setStatus(`Exported ${questions.length} unanswered questions as Markdown`);
+    }
+
+    document.getElementById("exportJson").onclick = exportUnansweredJson;
+    document.getElementById("exportMarkdown").onclick = exportUnansweredMarkdown;
 
     document.getElementById("upload").onclick = async () => {
       const file = document.getElementById("preArtifactsFile").files[0];
@@ -348,8 +1116,15 @@
       body.append("file", file);
       setStatus("Creating intake session");
       const response = await fetch("/api/intake", { method:"POST", body });
-      session = await response.json();
-      if (!response.ok) { setStatus(session.error || "Upload failed"); return; }
+      const created = await response.json();
+      if (!response.ok) { setStatus(created.error || "Upload failed"); return; }
+      session = created;
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.searchParams.set("dir", session.session_dir);
+      url.hash = "";
+      window.history.replaceState(null, "", url);
+      pendingFinalAttestations.clear();
       focusItemId = "";
       focusQueueName = "";
       setStatus("Session ready");
@@ -365,6 +1140,9 @@
         area.innerHTML = "";
         const card = document.createElement("article");
         card.className = "card";
+        if (!session.projection.ready) {
+          throw new Error(session.projection.error || "Visualization HTML was not generated");
+        }
         appendText(card, "strong", "", "Visualization ready");
         if (session.projection.html_path) {
           const link = document.createElement("a");
@@ -396,8 +1174,20 @@
       const response = await fetch(`/api/session?dir=${encodeURIComponent(dir)}`);
       session = await response.json();
       if (!response.ok) { setStatus(session.error || "Session load failed"); return; }
-      setStatus(focusItemId ? `Focused ${focusItemId}` : "Session ready");
+      if (focusQueueName && session.review_queues[focusQueueName]) activeQueue = focusQueueName;
+      const actualQueue = queueContaining(focusItemId);
+      if (actualQueue) {
+        activeQueue = actualQueue;
+        focusQueueName = actualQueue;
+        setStatus(`Focused ${focusItemId} in ${labels[actualQueue]}`);
+      } else if (focusItemId) {
+        focusItemId = "";
+        setStatus("The linked review item is no longer in a queue. It may be resolved or the visualization may need to be regenerated.");
+      } else {
+        setStatus(params.get("from") === "ux-resolution" ? "UX/UI decisions saved. Review the updated ArtPkg source, then continue to final review." : "Session ready");
+      }
       render();
+      if (params.get("from") === "ux-resolution") document.getElementById("sealReview").scrollIntoView({block:"start"});
     }
 
     loadSessionFromQuery();

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ArtPkg · Final review & coding handoff</title>
+  <style>
+    :root { color-scheme:light; font:16px/1.55 system-ui,sans-serif; color:#17293d; background:#f3f6fa; }
+    body { margin:0; } header { background:#132b45; color:white; padding:28px max(24px,calc((100vw - 1080px)/2)); }
+    h1 { font-size:26px; margin:8px 0; } h2 { font-size:20px; margin-top:0; } h3 { font-size:17px; }
+    main { max-width:1080px; margin:24px auto; padding:0 20px 48px; display:grid; gap:20px; }
+    section { background:white; border:1px solid #dce4ee; border-radius:14px; padding:24px; box-shadow:0 4px 16px #17355008; }
+    .eyebrow { font-size:12px; text-transform:uppercase; letter-spacing:.14em; color:#acc9ea; }
+    .muted { color:#52677c; } .notice { background:#edf5ff; padding:14px; border-left:4px solid #3575b9; }
+    .warning { background:#fff6e5; border-color:#c58a1e; } .row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    button,a.action { border:1px solid #c4d1df; border-radius:8px; padding:10px 16px; background:#fff; color:#183a60; font:inherit; cursor:pointer; text-decoration:none; }
+    button.primary { background:#1b5da5; color:white; border-color:#1b5da5; } button:disabled { opacity:.45; cursor:not-allowed; }
+    label { display:flex; gap:10px; align-items:flex-start; margin:16px 0; } input { margin-top:6px; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.6 ui-monospace,monospace; max-height:540px; overflow:auto; padding:16px; background:#f6f8fb; }
+    textarea { box-sizing:border-box; width:100%; min-height:160px; padding:12px; font:14px/1.5 system-ui; }
+    summary { cursor:pointer; font-weight:600; padding:12px 0; } dt { font-weight:650; } dd { margin:0 0 12px; overflow-wrap:anywhere; }
+    #status { max-width:1080px; margin:auto; overflow-wrap:anywhere; } #result[hidden] { display:none; }
+    [hidden] { display:none !important; }
+    #nextAction { border:2px solid #3575b9; }
+    #progress { display:flex; flex-wrap:wrap; gap:12px 28px; padding-left:22px; color:#52677c; }
+    .continuation { position:sticky; bottom:0; z-index:10; background:#fff; border-top:2px solid #3575b9; padding:14px max(20px,calc((100vw - 1080px)/2)); box-shadow:0 -4px 20px #17355018; display:flex; flex-wrap:wrap; gap:12px 24px; align-items:center; }
+    .continuation p { flex:1 1 280px; margin:0; }
+    .continuation button,.continuation a { font-weight:650; }
+    .continuation a.action { background:#1b5da5; color:#fff; }
+  </style>
+</head>
+<body>
+  <header><div class="eyebrow">ArtPkg → DSH</div><h1>Final review & coding handoff</h1><div id="status" role="status" aria-live="polite">Loading reviewed package…</div></header>
+  <main>
+    <nav><a id="back" class="action">Back to questionnaire</a></nav>
+    <section id="nextAction">
+      <ol id="progress"><li id="progressReview">Review</li><li id="progressSeal">Seal and admit</li><li id="progressPrepare">Prepare DSH</li><li>Continue in DSH</li></ol>
+      <h2 id="nextTitle">Loading your next action…</h2>
+      <p id="nextExplanation"></p>
+      <p id="actionError" role="alert" hidden></p>
+      <div id="reviewActions">
+        <p id="reviewNotice" class="notice"></p>
+        <label><input type="checkbox" id="reviewAck"><span id="reviewText"></span></label>
+        <button id="approve" class="primary" disabled>Save review &amp; continue →</button>
+      </div>
+      <div id="sealActions" hidden>
+        <p id="sealHint" class="notice" aria-live="polite"></p>
+        <label><input type="checkbox" id="sealAck"><span id="sealText"></span></label>
+        <button id="seal" class="primary" disabled>Seal &amp; continue →</button>
+      </div>
+      <div id="prepareActions" hidden>
+        <p id="prepareHint" class="notice" aria-live="polite"></p>
+        <label><input type="checkbox" id="prepareAck"><span id="prepareText"></span></label>
+        <button id="prepare" class="primary" disabled>Prepare DSH workspace →</button>
+      </div>
+      <p class="muted">Only the current step is shown. Check its confirmation and click its blue button to continue. No build or model prompt is started automatically.</p>
+    </section>
+    <section><h2>Package contents to review</h2>
+      <p class="muted">Recorded decisions carry forward. Confirming a record does not silently resolve its open question or approve its proposal.</p>
+      <dl id="context"></dl>
+      <details><summary>Open questions and recorded dispositions</summary><pre id="questions"></pre></details>
+      <details><summary>All normalized records, decisions and provenance</summary><pre id="records"></pre></details>
+      <details><summary>Generated package Markdown</summary><pre id="package"></pre></details>
+      <details><summary>Validation report</summary><pre id="validation"></pre></details>
+      <details><summary>Original source evidence (not approved requirements)</summary><pre id="source"></pre></details>
+      <details><summary>Technical seal information (an existing seal may predate this final review)</summary><pre id="sealStatus"></pre></details>
+    </section>
+    <section><h2>What this workflow sends forward</h2>
+      <p>The reviewed package and source evidence are sealed together. Preparation creates a separate project workspace, preserves the sealed files, adds working instructions and suggested prompts, and opens a blank session using DSH’s <strong>standard coding preset</strong>.</p>
+      <p>A prior seal is never overwritten. Adding final review to an older package creates a reviewed revision. Downloading the old seal or using the optional advisory reviewer does not complete this workflow.</p>
+      <p class="notice warning">The receipt stays plan-only with implementation authority NONE. Approve the bounded build scope and permissions separately in DSH. Select plan mode and workspace-write with human approvals before sending a prompt.</p>
+    </section>
+    <section id="result" hidden><h2>Continue in DSH</h2><dl id="workspace"></dl>
+      <p>Open DSH and select the displayed session. There is no verified session deep link. If needed, use Select Workspace Directory with the project path below. Paths refer to the ArtPkg host, not necessarily this browser’s computer.</p>
+      <a id="openDsh" class="action" target="_blank" rel="noopener noreferrer">Open DSH</a>
+      <p class="notice">No prompt has been sent. Select a suggested task below and copy it into DSH. Sending it there shares the referenced context with the selected model provider.</p>
+      <div id="prompts"></div>
+    </section>
+  </main>
+  <footer class="continuation" aria-label="Continue package handoff">
+    <p id="continueHint" role="status" aria-live="polite">Loading the next action…</p>
+    <a id="showConfirmation" class="action" href="#nextAction">Go to confirmation ↑</a>
+    <button id="continueAction" class="primary" aria-describedby="continueHint" disabled>Save review &amp; continue →</button>
+    <a id="continueDsh" class="action" target="_blank" rel="noopener noreferrer" hidden>Open DSH →</a>
+  </footer>
+  <script>
+    const dir = new URLSearchParams(location.search).get('dir') || '';
+    const el = id => document.getElementById(id);
+    let preview = null, busy = false, prepared = false;
+    el('back').href = '/?dir=' + encodeURIComponent(dir);
+    const status = text => { el('status').textContent = text; };
+    async function request(path, body) {
+      const response = await fetch(path, body ? {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_dir:dir, ...body})} : {});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+    function field(parent, name, value) {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = name; dd.textContent = typeof value === 'string' ? value : JSON.stringify(value);
+      parent.append(dt, dd);
+    }
+    function controls() {
+      const reviewed = preview?.review_current === true;
+      const sealed = preview?.sealing?.sealed === true;
+      const admitted = preview?.pipeline?.result?.admission_status === 'ACCEPTED';
+      const canSeal = reviewed && !admitted && preview?.sealing?.completion_result === 'READY_TO_SEAL';
+      const canPrepare = reviewed && sealed && admitted;
+      el('reviewActions').hidden = reviewed || prepared;
+      el('sealActions').hidden = !reviewed || canPrepare || prepared;
+      el('prepareActions').hidden = !canPrepare || prepared;
+      el('progressReview').textContent = reviewed ? 'Review ✓' : 'Review — current';
+      el('progressSeal').textContent = reviewed && admitted ? 'Seal and admit ✓' : 'Seal and admit';
+      el('progressPrepare').textContent = prepared ? 'Prepare DSH ✓' : 'Prepare DSH';
+      el('nextTitle').textContent = prepared ? 'Ready · Continue in DSH below'
+        : !reviewed ? 'Next · Record your final package review'
+        : !canPrepare ? 'Next · Seal and admit this reviewed revision' : 'Next · Prepare your DSH coding workspace';
+      el('nextExplanation').textContent = prepared ? 'Your reviewed handoff and suggested prompts are ready. Select the coding session in DSH and choose a task.'
+        : !reviewed ? 'Read the package contents below, then confirm and save the final review here. Your questionnaire answers are retained; you do not need to answer them again.'
+        : !canPrepare ? 'Final review is saved. Confirm below to seal its exact contents and obtain a Pipeline-A admission receipt. If admission previously failed, this action retries admission without changing the seal.'
+        : 'The reviewed package is sealed and admitted. Confirm below to prepare its files and suggested prompts for DSH—not the separate advisory reviewer.';
+      el('reviewAck').disabled = busy || !preview || reviewed;
+      el('sealAck').disabled = busy || !canSeal;
+      el('prepareAck').disabled = busy || !canPrepare;
+      if (!canSeal) el('sealAck').checked = false;
+      if (!canPrepare) el('prepareAck').checked = false;
+      el('approve').disabled = busy || !preview || !el('reviewAck').checked || preview.review_current;
+      el('approve').textContent = reviewed ? 'Final review recorded' : 'Save review & continue →';
+      el('seal').disabled = busy || !canSeal || !el('sealAck').checked;
+      el('prepare').disabled = busy || !canPrepare || !el('prepareAck').checked;
+      el('reviewNotice').textContent = reviewed
+        ? 'Step 1 complete: final review is saved and matches this document, source and template.'
+        : el('reviewAck').checked
+          ? 'Your checkbox is selected, but the review is not saved yet. Click Save review & continue to proceed to sealing. DSH preparation follows sealing and admission.'
+          : 'Step 1: inspect the package, check the review confirmation, then click Save review & continue. Checking the box alone does not save the review.';
+      el('sealHint').textContent = !reviewed
+        ? 'Locked: complete step 1 by clicking Save review & continue. An older sealed package does not contain this new final review.'
+        : canPrepare ? 'This reviewed revision is already sealed and admitted. Continue to step 3.'
+        : !canSeal ? 'Locked: resolve the sealing blockers shown above, then return to this page.'
+        : 'Step 2 ready: check the confirmation below, then click Seal & continue to seal and admit the reviewed package through Pipeline-A.';
+      el('prepareHint').textContent = !reviewed
+        ? 'Locked: first save the final review in step 1, then seal and admit the reviewed revision in step 2.'
+        : !canPrepare ? 'Locked: complete step 2 by clicking Seal & continue.'
+        : 'Step 3 ready: check the confirmation below, then click Prepare DSH workspace. A verified admission receipt is checked when preparing.';
+      const active = el(!reviewed ? 'approve' : canPrepare ? 'prepare' : 'seal');
+      el('continueAction').textContent = busy ? 'Working…' : active.textContent;
+      el('continueAction').disabled = active.disabled || prepared;
+      el('continueAction').hidden = prepared;
+      el('continueDsh').hidden = !prepared;
+      el('showConfirmation').hidden = prepared;
+      el('continueHint').textContent = busy ? 'Saving this step. Please wait…'
+        : !el('actionError').hidden ? el('actionError').textContent
+        : prepared ? 'Workspace ready. Open DSH, select the displayed coding session, and review a suggested prompt.'
+        : active.disabled ? (!preview ? 'The package has not loaded yet.'
+          : reviewed && !canPrepare && !canSeal ? 'Sealing is blocked. Go to the current step to review the blockers.'
+          : 'Check the current step’s confirmation above to enable Continue.')
+        : !reviewed ? 'Confirmation selected. Save your review to continue to sealing—not directly to DSH yet.'
+        : canPrepare ? 'Ready to prepare your coding workspace. No prompt or build starts automatically.'
+        : 'Ready to seal and admit the reviewed package, then prepare DSH.';
+    }
+    function render() {
+      const c = preview.context;
+      el('context').replaceChildren();
+      for (const [key, value] of Object.entries({Project:c.project, Purpose:c.purpose, Objective:c.objective, 'In scope':c.in_scope, 'Out of scope':c.out_of_scope, 'Record counts':c.record_counts})) field(el('context'), key, value);
+      el('questions').textContent = JSON.stringify(c.open_questions, null, 2);
+      el('records').textContent = JSON.stringify(c.records, null, 2);
+      el('package').textContent = preview.package_markdown;
+      el('validation').textContent = preview.validation_markdown;
+      el('source').textContent = preview.source ? `SHA-256: ${preview.source.sha256}\n\n${preview.source.text}` : 'Source evidence was not supplied. Source fidelity cannot be verified.';
+      el('reviewText').textContent = preview.confirmation;
+      el('prepareText').textContent = preview.prepare_confirmation;
+      el('sealText').textContent = preview.sealing.confirmation_text || 'Resolve sealing blockers first.';
+      el('sealStatus').textContent = JSON.stringify({package:preview.sealing.package_id, version:preview.sealing.package_version, sealed:preview.sealing.sealed, blockers:preview.sealing.seal_blockers}, null, 2);
+      for (const id of ['reviewAck','sealAck','prepareAck']) el(id).checked = false;
+      prepared = false;
+      el('result').hidden = true;
+      controls();
+    }
+    async function refreshPipeline() {
+      const summary = await request('/api/session?dir=' + encodeURIComponent(dir));
+      preview.pipeline = summary.pipeline_admission || {};
+    }
+    async function load() {
+      preview = await request('/api/session/final-review?dir=' + encodeURIComponent(dir));
+      await refreshPipeline(); render();
+    }
+    async function action(work) {
+      if (busy) return;
+      busy = true; controls(); status('Working…'); el('actionError').hidden = true;
+      try { await work(); } catch (error) {
+        status(error.message); el('actionError').textContent = error.message; el('actionError').hidden = false;
+      }
+      finally { busy = false; controls(); }
+    }
+    for (const id of ['reviewAck','sealAck','prepareAck']) el(id).onchange = controls;
+    el('continueAction').onclick = () => {
+      if (busy || !preview || el('continueAction').disabled) return;
+      const canPrepare = preview.review_current && preview.sealing.sealed && preview.pipeline?.result?.admission_status === 'ACCEPTED';
+      return el(!preview.review_current ? 'approve' : canPrepare ? 'prepare' : 'seal').click();
+    };
+    el('approve').onclick = () => action(async () => {
+      preview = await request('/api/session/final-review', {basis_sha256:preview.basis_sha256, confirmation:preview.confirmation});
+      await refreshPipeline();
+      render(); status('Final review recorded. Seal and admit this reviewed revision next.');
+    });
+    el('seal').onclick = () => action(async () => {
+      await request('/api/session/seal', {reviewed:true, review_basis_sha256:preview.basis_sha256, confirmation:preview.sealing.confirmation_text, target_binding:preview.sealing.target_binding});
+      await load(); status('Reviewed package sealed and admitted.');
+    });
+    el('prepare').onclick = () => action(async () => {
+      const result = await request('/api/session/coding-prepare', {sealed_id:preview.sealing.sealed_id, confirmation:preview.prepare_confirmation});
+      el('workspace').replaceChildren();
+      field(el('workspace'), 'Project workspace', result.workspace);
+      field(el('workspace'), 'DSH session ID', result.dsh_session_id);
+      field(el('workspace'), 'Model destination', `${result.provider} / ${result.model}`);
+      field(el('workspace'), 'Execution approval', result.execution_approval);
+      const url = new URL(result.chat_url);
+      if (!['http:','https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Invalid DSH origin');
+      el('openDsh').href = url.href;
+      el('continueDsh').href = url.href;
+      el('prompts').replaceChildren();
+      for (const prompt of result.prompts) {
+        const heading = document.createElement('h3'), text = document.createElement('textarea'), copy = document.createElement('button');
+        heading.textContent = prompt.title; text.value = prompt.text; text.readOnly = true; text.setAttribute('aria-label', prompt.title);
+        copy.textContent = 'Copy prompt'; copy.onclick = async () => {
+          try { await navigator.clipboard.writeText(text.value); status('Prompt copied; review and send it in DSH.'); }
+          catch { text.focus(); text.select(); status('Clipboard unavailable. Copy the selected prompt manually.'); }
+        };
+        el('prompts').append(heading, text, copy);
+      }
+      el('result').hidden = false;
+      prepared = true;
+      status('Coding handoff ready. No prompt sent and no build started.');
+    });
+    load().then(() => status('Use the current confirmation and Continue button to proceed.')).catch(error => {
+      status(error.message); el('continueHint').textContent = error.message;
+    });
+  </script>
+</body>
+</html>

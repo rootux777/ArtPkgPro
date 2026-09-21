@@ -6,7 +6,9 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import webbrowser
+import weakref
 from dataclasses import dataclass
 from email.parser import BytesParser
 from email.policy import default
@@ -19,10 +21,31 @@ import artpkg_intake
 import artpkg_archify_projection
 import artpkg_archify_runner
 import artpkg_intake_auth
+import artpkg_pipeline_admission
+import artpkg_sealed_handoff
+import artpkg_dsh_bridge
+import artpkg_coding_handoff
+import artpkg_ux_preparation
 
 
 # 10 MiB limit for uploads (in bytes)
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+
+# Process-local locks for ThreadingHTTPServer. Weak values bound the registry to
+# active requests; each caller keeps a strong reference while waiting/holding.
+_SESSION_LOCKS: weakref.WeakValueDictionary[Path, Any] = weakref.WeakValueDictionary()
+_SESSION_LOCKS_GUARD = threading.Lock()
+
+
+def _session_lock(resolved_session_dir: Path):
+    """Return a shared RLock for an already canonical, owner-checked path."""
+    with _SESSION_LOCKS_GUARD:
+        lock = _SESSION_LOCKS.get(resolved_session_dir)
+        if lock is None:
+            lock = threading.RLock()
+            _SESSION_LOCKS[resolved_session_dir] = lock
+        return lock
 
 
 @dataclass
@@ -30,6 +53,16 @@ class UploadedFile:
     filename: str
     content: bytes
     content_type: str
+
+
+def pipeline_admission_status(sealing: dict[str, Any]) -> dict[str, Any]:
+    configuration = artpkg_pipeline_admission.configuration_status()
+    unmet = list(sealing.get("seal_blockers", [])) + list(configuration["unmet_conditions"])
+    return {
+        **configuration,
+        "eligible": sealing.get("completion_result") == "READY_TO_SEAL" and not unmet,
+        "unmet_conditions": unmet,
+    }
 
 
 def parse_multipart_upload(content_type: str, body: bytes) -> UploadedFile:
@@ -43,17 +76,62 @@ def parse_multipart_upload(content_type: str, body: bytes) -> UploadedFile:
     raise ValueError("multipart upload did not include file")
 
 
-def session_summary(session: dict[str, Any]) -> dict[str, Any]:
+def session_summary(session: dict[str, Any], reviewer: str | None = None) -> dict[str, Any]:
     queues = session.get("review_queues", {})
-    return {
+    summary = {
         "session_id": session.get("session_id"),
         "session_dir": session.get("session_dir"),
         "source": session.get("source"),
         "validation": session.get("validation"),
         "review_queues": queues,
         "queue_counts": {name: len(items) for name, items in queues.items()},
+        "question_plan": session.get("question_plan"),
+        "review_summary": session.get("review_summary"),
+        "human_work_counts": session.get("human_work_counts"),
         "answers_path": session.get("answers_path"),
+        "ux_resolution": artpkg_ux_preparation.resolution_status(session.get("document", {"answers": {}})),
     }
+    if reviewer is not None:
+        try:
+            sealing = artpkg_sealed_handoff.review_package(session, reviewer)
+            summary["sealing"] = sealing
+            pipeline_status = pipeline_admission_status(sealing)
+            summary["pipeline_admission"] = pipeline_status
+            if pipeline_status["available"] and sealing.get("sealed"):
+                existing = artpkg_pipeline_admission.existing_admission(
+                    package_id=sealing["package_id"],
+                    package_version=sealing["package_version"],
+                    submission_id=sealing["submission_id"],
+                    package_sha256=sealing["sealed_id"],
+                )
+                if existing is not None:
+                    summary["pipeline_admission"]["result"] = existing
+        except artpkg_sealed_handoff.HandoffError as exc:
+            completion = artpkg_sealed_handoff.completion_summary(session["document"], session["validation"])
+            summary["sealing"] = {**completion, "completion_result": "BLOCKED", "seal_blockers": [str(exc)]}
+            summary["pipeline_admission"] = pipeline_admission_status(summary["sealing"])
+        except artpkg_pipeline_admission.AdmissionError as exc:
+            summary["pipeline_admission"] = {
+                **pipeline_status,
+                "available": False,
+                "eligible": False,
+                "unmet_conditions": [str(exc)],
+            }
+        summary["dsh_handoff"] = artpkg_dsh_bridge.status(session, reviewer)
+    return summary
+
+
+def sealed_zip_response(session_dir: str, sealed_id: str, username: str, workspace: str | Path) -> tuple[dict[str, str], bytes]:
+    resolved = resolve_session_dir_with_owner(session_dir, username, workspace)
+    with _session_lock(resolved):
+        files = artpkg_sealed_handoff.load_sealed_files(resolved, sealed_id)
+        body = artpkg_sealed_handoff.deterministic_zip(files)
+    headers = {
+        "Content-Type": "application/zip",
+        "Content-Disposition": f'attachment; filename="artpkg-sealed-{sealed_id}.zip"',
+        "Content-Length": str(len(body)),
+    }
+    return headers, body
 
 
 def resolve_session_dir(session_dir: str, workspace: str | Path) -> Path:
@@ -169,10 +247,11 @@ def projection_html_response(
         if username is not None
         else resolve_session_dir(session_dir, workspace)
     )
-    html_path = resolved_session_dir / "artpkg-readiness.architecture.html"
-    if not html_path.exists():
-        raise FileNotFoundError("projection HTML has not been generated")
-    body = html_path.read_bytes()
+    with _session_lock(resolved_session_dir):
+        html_path = resolved_session_dir / "artpkg-readiness.architecture.html"
+        if not html_path.exists():
+            raise FileNotFoundError("projection HTML has not been generated")
+        body = html_path.read_bytes()
     return 200, {"Content-Type": "text/html; charset=utf-8", "Content-Length": str(len(body))}, body
 
 
@@ -246,7 +325,13 @@ def decorate_projection_html(html_path: str | Path, mapping_path: str | Path) ->
     panel.appendChild(eyebrow);
     panel.appendChild(summary);
     panel.appendChild(impact);
-    panel.appendChild(link);
+        if (action.focus) {{
+            panel.appendChild(link);
+        }} else {{
+            var unavailable = document.createElement('p');
+            unavailable.textContent = 'No matching open review item currently maps to this card. Regenerate the visualization after review changes.';
+            panel.appendChild(unavailable);
+        }}
   }}
   document.addEventListener('click', function (event) {{
     var node = event.target.closest && event.target.closest('[data-node-id]');
@@ -295,7 +380,15 @@ def build_projection_summary(session: dict[str, Any]) -> dict[str, Any]:
         "operation": "visual-check",
         "receipt": {"ok": False, "error": "Archify deliver did not create fresh HTML"},
     }
+    ready = deliver.get("ok") is True and Path(html_path).exists()
+    error = None if ready else (
+        deliver.get("receipt", {}).get("error")
+        or deliver.get("stderr")
+        or "Archify deliver did not create fresh HTML"
+    )
     return {
+        "ready": ready,
+        "error": error,
         "ir_path": result.ir_path,
         "mapping_path": result.mapping_path,
         "validation_path": result.validation_path,
@@ -368,9 +461,11 @@ class IntakeHandler(BaseHTTPRequestHandler):
         
         parsed = urlparse(self.path)
         
-        if parsed.path == "/":
+        if parsed.path in {"/", "/review", "/ux"}:
             try:
-                html = (Path(__file__).with_name("artpkg_intake_ui.html")).read_bytes()
+                name = ("artpkg_ux_preparation.html" if parsed.path == "/ux" else
+                        "artpkg_final_review.html" if parsed.path == "/review" else "artpkg_intake_ui.html")
+                html = (Path(__file__).with_name(name)).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(html)))
@@ -380,21 +475,79 @@ class IntakeHandler(BaseHTTPRequestHandler):
                 self._json(500, {"error": str(exc)})
             return
         
-        if parsed.path == "/api/session":
+        if parsed.path == "/api/session/ux":
+            try:
+                params = parse_qs(parsed.query)
+                try:
+                    resolved = resolve_session_dir_with_owner(params.get("dir", [""])[0], username, self.workspace)
+                except ValueError:
+                    self._send_forbidden()
+                    return
+                # Unlike legacy path handling, the new operations reject links and
+                # traversal in the original spelling before any filesystem access.
+                artpkg_ux_preparation.runtime()
+                from ux_harness.paths import safe_path
+                safe_path(params.get("dir", [""])[0])
+                with _session_lock(resolved):
+                    session = load_workspace_session_with_owner(str(resolved), username, self.workspace)
+                    operation = params.get("op", ["export"])[0]
+                    if operation in {"template", "prompt"}:
+                        name = "template_ux_ui_package.md" if operation == "template" else "UX-UI-AGENT-PROMPT.md"
+                        result = {"filename": name, "content": (artpkg_ux_preparation.UXPKG_ROOT / "templates" / name).read_text(encoding="utf-8")}
+                    elif operation == "export":
+                        result = artpkg_ux_preparation.requirements_export(session)
+                    elif operation in {"preview", "verify", "resolution"}:
+                        coordinator = artpkg_ux_preparation.Preparation(session, username)
+                        upload_id = params.get("upload_id", [""])[0]
+                        result = (coordinator.preview(upload_id) if operation == "preview" else
+                                  coordinator.resolution_questionnaire(upload_id) if operation == "resolution" else
+                                  coordinator.verify(upload_id))
+                    else:
+                        raise ValueError("unknown UX preparation operation")
+                self._json(200, result)
+            except Exception as exc:
+                self._json(400, {"error": str(exc)})
+            return
+
+        if parsed.path in {"/api/session", "/api/session/final-review"}:
             try:
                 params = parse_qs(parsed.query)
                 session_dir = params.get("dir", [""])[0]
                 
                 # Enforce ownership
                 try:
-                    session = load_workspace_session_with_owner(session_dir, username, self.workspace)
+                    resolved = resolve_session_dir_with_owner(session_dir, username, self.workspace)
                 except ValueError:
                     self._send_forbidden()
                     return
+
+                with _session_lock(resolved):
+                    try:
+                        session = load_workspace_session_with_owner(str(resolved), username, self.workspace)
+                    except ValueError:
+                        self._send_forbidden()
+                        return
+                    summary = (artpkg_coding_handoff.review_preview(session, username)
+                               if parsed.path.endswith("final-review") else session_summary(session, username))
                 
-                self._json(200, session_summary(session))
+                self._json(200, summary)
             except Exception as exc:
                 self._json(400, {"error": str(exc)})
+            return
+
+        if parsed.path == "/api/session/sealed-download":
+            try:
+                params = parse_qs(parsed.query)
+                headers, body = sealed_zip_response(
+                    params.get("dir", [""])[0], params.get("sealed", [""])[0], username, self.workspace,
+                )
+                self.send_response(200)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as exc:
+                self._json(404, {"error": str(exc)})
             return
         
         if parsed.path == "/api/session/projection-html":
@@ -439,8 +592,20 @@ class IntakeHandler(BaseHTTPRequestHandler):
             self._send_payload_too_large()
             return
         
+        session_lock = None
         try:
             parsed = urlparse(self.path)
+            if parsed.path.startswith("/api/session/ux-"):
+                origin = self.headers.get("Origin")
+                if (self.headers.get_content_type() != "application/json"
+                        or self.headers.get("X-ArtPkg-UX") != "1"
+                        or self.headers.get("Sec-Fetch-Site") == "cross-site"
+                        or (origin is not None and origin != "http://" + self.headers.get("Host", ""))):
+                    self._send_forbidden()
+                    return
+                if content_length < 1 or content_length > 2 * 512 * 1024:
+                    self._send_payload_too_large()
+                    return
             body = self.rfile.read(content_length)
             
             if parsed.path == "/api/intake":
@@ -458,7 +623,7 @@ class IntakeHandler(BaseHTTPRequestHandler):
                     try:
                         # Create session in user's namespace
                         session = create_intake_session_for_user(source, username, self.workspace, template_path=self.template_path)
-                        self._json(200, session_summary(session))
+                        self._json(200, session_summary(session, username))
                     finally:
                         # Always clean up temporary upload directory
                         if upload_dir and upload_dir.exists():
@@ -470,19 +635,72 @@ class IntakeHandler(BaseHTTPRequestHandler):
                     raise exc
                 return
 
-            payload = json.loads(body.decode("utf-8") or "{}")
+            payload = (artpkg_sealed_handoff.parse_strict_json(body)
+                       if parsed.path.startswith("/api/session/ux-") else json.loads(body.decode("utf-8") or "{}"))
             session_dir = payload.get("session_dir", "")
             
             # Enforce ownership on all session operations
             try:
-                session = load_workspace_session_with_owner(session_dir, username, self.workspace)
+                resolved = resolve_session_dir_with_owner(session_dir, username, self.workspace)
+                if parsed.path.startswith("/api/session/ux-"):
+                    artpkg_ux_preparation.runtime()
+                    from ux_harness.paths import safe_path
+                    safe_path(session_dir)
+                session_lock = _session_lock(resolved)
+                # Acquire BEFORE loading the full document, and retain through
+                # persistence and summary generation for every dispatch branch.
+                session_lock.acquire()
+                session = load_workspace_session_with_owner(str(resolved), username, self.workspace)
             except ValueError:
                 self._send_forbidden()
+                return
+
+            if parsed.path.startswith("/api/session/ux-"):
+                artpkg_ux_preparation.runtime()
+                from ux_harness.paths import safe_path
+                safe_path(session_dir)
+                coordinator = artpkg_ux_preparation.Preparation(session, username)
+                operation = parsed.path.removeprefix("/api/session/ux-")
+                fields = {
+                    "upload": {"session_dir", "filename", "markdown"},
+                    "resolve": {"session_dir", "upload_id", "decisions"},
+                    "review": {"session_dir", "upload_id", "basis_sha256", "attestation", "exclusions", "type_mappings"},
+                    "run": {"session_dir", "upload_id"},
+                }
+                if operation not in fields or set(payload) != fields[operation]:
+                    raise ValueError("unknown UX operation or fields; paths/executables are server-owned")
+                if operation == "upload":
+                    if not isinstance(payload["markdown"], str):
+                        raise ValueError("Markdown upload must be UTF-8 text")
+                    result = coordinator.upload(payload["markdown"].encode("utf-8"), payload["filename"])
+                elif operation == "resolve":
+                    result = coordinator.resolve(payload["upload_id"], payload["decisions"])
+                elif operation == "review":
+                    result = coordinator.review(payload["upload_id"], payload["basis_sha256"], payload["attestation"],
+                                                payload["exclusions"], payload["type_mappings"])
+                else:
+                    result = coordinator.run(payload["upload_id"])
+                self._json(200, result)
                 return
             
             if parsed.path == "/api/session/confirm":
                 artpkg_intake.confirm_answer(session, payload["question_id"], username)
-                self._json(200, session_summary(session))
+                self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path in {"/api/session/final-review", "/api/session/coding-prepare"}:
+                origin = self.headers.get("Origin")
+                if (self.headers.get_content_type() != "application/json"
+                        or (origin is not None and origin != "http://" + self.headers.get("Host", ""))):
+                    self._send_forbidden()
+                    return
+                if parsed.path.endswith("coding-prepare"):
+                    self._json(200, artpkg_coding_handoff.prepare(
+                        session, username, payload.get("sealed_id", ""), payload.get("confirmation", "")))
+                else:
+                    artpkg_coding_handoff.approve_review(
+                        session, username, payload.get("basis_sha256", ""), payload.get("confirmation", ""))
+                    self._json(200, artpkg_coding_handoff.review_preview(session, username))
                 return
             
             if parsed.path == "/api/session/answer":
@@ -493,26 +711,101 @@ class IntakeHandler(BaseHTTPRequestHandler):
                     username,
                     payload.get("state", "PROVIDED"),
                 )
-                self._json(200, session_summary(session))
+                self._json(200, session_summary(session, username))
                 return
             
             if parsed.path == "/api/session/reject":
                 artpkg_intake.reject_seeded_answer(session, payload["question_id"], payload.get("reason", "Rejected in UI"), username)
-                self._json(200, session_summary(session))
+                self._json(200, session_summary(session, username))
                 return
             
             if parsed.path == "/api/session/record/confirm":
                 artpkg_intake.confirm_record(session, payload["record_id"], username)
-                self._json(200, session_summary(session))
+                self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path == "/api/session/record/advance-status":
+                artpkg_intake.advance_record_status(session, payload["record_id"], payload["target_status"], username)
+                self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path == "/api/session/record-section/confirm":
+                artpkg_intake.confirm_record_section(session, payload["section"], username)
+                self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path == "/api/session/intent-summary":
+                artpkg_intake.review_intent_summary(session, payload["action"], username)
+                self._json(200, session_summary(session, username))
                 return
             
             if parsed.path == "/api/session/record/reject":
                 artpkg_intake.reject_seeded_record(session, payload["record_id"], payload.get("reason", "Rejected in UI"), username)
-                self._json(200, session_summary(session))
+                self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path in {"/api/session/dsh-send", "/api/session/dsh-transcript"}:
+                origin = self.headers.get("Origin")
+                if (self.headers.get_content_type() != "application/json"
+                        or (origin is not None and origin != "http://" + self.headers.get("Host", ""))):
+                    self._send_forbidden()
+                    return
+                if parsed.path.endswith("dsh-transcript"):
+                    self._json(200, artpkg_dsh_bridge.transcript(session, username))
+                else:
+                    artpkg_dsh_bridge.send(session, username, payload.get("confirmation", ""))
+                    self._json(200, session_summary(session, username))
+                return
+
+            if parsed.path == "/api/session/seal":
+                if "review_basis_sha256" in payload:
+                    if (not artpkg_coding_handoff.review_is_current(session)
+                            or payload["review_basis_sha256"] != artpkg_coding_handoff.review_digest(session)):
+                        raise ValueError("Final review changed; reload and review before sealing")
+                preflight = pipeline_admission_status(
+                    artpkg_sealed_handoff.review_package(
+                        session, username, payload.get("target_binding"),
+                    )
+                )
+                if not preflight["eligible"]:
+                    raise artpkg_pipeline_admission.AdmissionError(
+                        "ADMISSION_UNAVAILABLE",
+                        "; ".join(preflight["unmet_conditions"]),
+                    )
+                result, _ = artpkg_sealed_handoff.seal_session(
+                    session,
+                    username,
+                    payload.get("confirmation", ""),
+                    payload.get("reviewed") is True,
+                    payload.get("target_binding"),
+                )
+                admission = artpkg_pipeline_admission.admit_sealed_package(
+                    result.sealed_dir,
+                    package_id=result.package_id,
+                    package_version=result.package_version,
+                    submission_id=result.submission_id,
+                    package_sha256=result.sealed_dir.name,
+                )
+                summary = session_summary(session, username)
+                summary["sealed_package"] = {
+                    "content_set_sha256": result.content_set_sha256,
+                    "package_id": result.package_id,
+                    "package_sha256": result.package_sha256,
+                    "package_version": result.package_version,
+                    "sealed_id": result.sealed_dir.name,
+                    "submission_id": result.submission_id,
+                }
+                summary["pipeline_admission"] = {
+                    "available": True,
+                    "eligible": True,
+                    "unmet_conditions": [],
+                    "result": admission,
+                }
+                self._json(200, summary)
                 return
             
             if parsed.path == "/api/session/project":
-                summary = session_summary(session)
+                summary = session_summary(session, username)
                 summary["projection"] = build_projection_summary(session)
                 self._json(200, summary)
                 return
@@ -521,6 +814,9 @@ class IntakeHandler(BaseHTTPRequestHandler):
         
         except Exception as exc:
             self._json(400, {"error": str(exc)})
+        finally:
+            if session_lock is not None:
+                session_lock.release()
 
 
 def main(argv: list[str] | None = None) -> int:

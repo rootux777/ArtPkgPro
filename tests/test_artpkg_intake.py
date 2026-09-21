@@ -54,6 +54,36 @@ class IntakeSessionTests(unittest.TestCase):
         self.assertEqual("Example Intake", session["document"]["answers"]["PKG-001"]["value"])
         self.assertEqual("SOURCE_ARTIFACT", session["document"]["answers"]["PKG-001"]["source_type"])
 
+    def test_calculator_pre_artifacts_reaches_questionnaire_with_structure_and_authority_intact(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        session = intake.create_intake_session(
+            source,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+        seed = json.loads(Path(session["seed_path"]).read_text(encoding="utf-8"))
+        records = session["document"]["records"]
+        scope = session["document"]["answers"]["BND-001"]["value"]
+
+        self.assertEqual(source.read_text(encoding="utf-8"), Path(session["source"]["stored_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(3, len(records["functional_requirements"]))
+        self.assertEqual(2, len(records["non_functional_requirements"]))
+        self.assertEqual(2, len(records["acceptance_criteria"]))
+        self.assertEqual(
+            ["CONFIRMED_BY_USER", "OBSERVED", "PROPOSED", "INFERRED", "UNKNOWN", "DEFERRED", "REJECTED"],
+            seed["source_statuses"],
+        )
+        self.assertEqual(
+            ["CONFIRMED_BY_USER", "INFERRED", "PROPOSED"],
+            [record["fields"]["source_status"] for record in records["functional_requirements"]],
+        )
+        self.assertLess(scope.index("written in Python"), scope.index("four arithmetic operations"))
+        self.assertLess(scope.index("four arithmetic operations"), scope.index("local single-user workflow"))
+        self.assertEqual("THRESHOLD_REQUIRED", records["non_functional_requirements"][1]["fields"]["measurement"].strip(" `"))
+        self.assertEqual("NONE", session["document"]["answers"]["AUT-001"]["value"])
+        self.assertEqual("HUMAN_REVIEW_ONLY", session["validation"]["next_permitted_action"])
+
     def test_gitignore_excludes_local_artpkg_sessions(self):
         gitignore = (Path(__file__).parents[1] / ".gitignore").read_text(encoding="utf-8")
         self.assertIn(".artpkg/", gitignore)
@@ -156,10 +186,137 @@ class IntakeSessionTests(unittest.TestCase):
         bnd_item = next(item for item in session["review_queues"]["needs_answer"] if item["id"] == "BND-001")
 
         self.assertEqual("UNKNOWN", bnd_item["source_context"]["answer_status"])
-        self.assertEqual("missing_in_source", bnd_item["source_context"]["source_status"])
+        self.assertEqual("ABSENT", bnd_item["source_context"]["source_status"])
         self.assertIn("No explicit in-scope statement", bnd_item["source_context"]["summary"])
         self.assertEqual("Classification confidence", bnd_item["confidence_context"]["label"])
         self.assertIn("missing or seeded", bnd_item["confidence_context"]["meaning"])
+
+    def test_calculator_generates_only_materially_absent_human_questions(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        session = intake.create_intake_session(source, self.root, template_path=self.template, respondent="Reviewer")
+
+        unanswered = {item["id"]: item for item in session["review_queues"]["needs_answer"] if item["kind"] == "answer"}
+        confirmations = {item["id"]: item for item in session["review_queues"]["needs_confirmation"] if item["kind"] == "answer"}
+        self.assertEqual({"PKG-003", "PKG-004", "SEC-001"}, set(unanswered))
+        for qid, item in unanswered.items():
+            self.assertEqual("ABSENT", item["source_status"], qid)
+            self.assertEqual("required non-blocking answer is absent", item["reason"], qid)
+        for qid in ("OVR-001", "OVR-002", "OVR-008", "PKG-001", "PKG-005"):
+            self.assertNotIn(qid, confirmations, qid)
+            self.assertIn(qid, session["question_plan"]["review_summary_ids"], qid)
+            self.assertEqual("SOURCE_ARTIFACT", session["document"]["answers"][qid]["source_type"], qid)
+
+    def test_concept_discovery_uses_phase_aware_question_plan(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        session = intake.create_intake_session(source, self.root, template_path=self.template, respondent="Reviewer")
+
+        plan = session["question_plan"]
+        active_ids = set(plan["active_question_ids"])
+        self.assertEqual("DISCOVERY_CONCEPT_NOT_CREATED", plan["profile"])
+        self.assertNotIn("PKG-006", active_ids)
+        self.assertFalse(any(qid.startswith(("ART-", "ENV-", "EVD-", "HAR-", "HND-", "VAL-")) for qid in active_ids))
+        self.assertEqual("NONE", session["document"]["answers"]["AUT-001"]["value"])
+        self.assertEqual("NOT_APPLICABLE", session["document"]["answers"]["PKG-006"]["state"])
+        self.assertIn("intent_summary", session["review_summary"])
+
+    def test_accept_intent_summary_is_visible_after_refresh(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+
+        review = intake.review_intent_summary(session, "ACCEPT SUMMARY", "Reviewer")
+
+        self.assertEqual(review, session["review_summary"]["intent_summary"]["review"])
+        self.assertEqual("ACCEPT SUMMARY", session["review_summary"]["intent_summary"]["review"]["action"])
+        reloaded = intake.load_intake_session(session["session_dir"])
+        self.assertEqual(review, reloaded["review_summary"]["intent_summary"]["review"])
+
+    def test_seeded_records_are_grouped_for_section_review(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        session = intake.create_intake_session(source, self.root, template_path=self.template, respondent="Reviewer")
+
+        record_tasks = [item for item in session["review_queues"]["needs_confirmation"] if item["kind"] == "record"]
+        section_tasks = session["review_queues"]["repeated_records_pending_review"]
+        self.assertEqual([], record_tasks)
+        self.assertTrue(any(item["section"] == "functional_requirements" for item in section_tasks))
+        self.assertEqual(3, next(item["count"] for item in section_tasks if item["section"] == "functional_requirements"))
+
+        original = [(record["id"], record["fields"].get("source_status"), record["source_type"]) for record in session["document"]["records"]["functional_requirements"]]
+        intake.confirm_record_section(session, "functional_requirements", "Reviewer")
+        confirmed = session["document"]["records"]["functional_requirements"]
+        self.assertEqual(original, [(record["id"], record["fields"].get("source_status"), record["source_type"]) for record in confirmed])
+        self.assertTrue(all(record["review_disposition"] == "HUMAN_CONFIRMED" for record in confirmed))
+        self.assertTrue(all(record["section_confirmation"]["scope"] == "functional_requirements" for record in confirmed))
+
+    def test_existing_system_change_keeps_repository_snapshot_active(self):
+        document = intake.questionnaire.new_answers(str(self.template), str(self.root), "Reviewer")
+        intake.questionnaire.set_answer(document, "PKG-002", "CROSS_PROJECT_TRANSFER")
+        intake.questionnaire.set_answer(document, "PKG-005", str(self.root))
+        intake.questionnaire.set_answer(document, "PKG-006", "abc123")
+
+        plan = intake.build_question_plan(document)
+
+        self.assertEqual("LIFECYCLE_DEFAULT", plan["profile"])
+        self.assertIn("PKG-006", plan["active_question_ids"])
+        self.assertEqual("abc123", document["answers"]["PKG-006"]["value"])
+
+    def test_active_work_counts_do_not_treat_zero_answers_as_complete(self):
+        source = Path(__file__).parent / "fixtures" / "basic-windows-calculator_preartifacts.md"
+        session = intake.create_intake_session(source, self.root, template_path=self.template, respondent="Reviewer")
+
+        counts = session["human_work_counts"]
+        self.assertIn("needs_human_answer", counts)
+        self.assertIn("needs_human_confirmation", counts)
+        self.assertIn("repeated_records_pending_review", counts)
+        self.assertEqual(3, counts["final_attestations_remaining"])
+        self.assertFalse(counts["ready_to_seal"])
+
+    def test_q_b_rows_are_extracted_as_open_questions(self):
+        self.pre.write_text(
+            "# Pre-Artifacts Package\n\n## 12. Open and Blocking Questions\n\n"
+            "| ID | Question | Why it matters | Status |\n"
+            "|---|---|---|---|\n"
+            "| Q-B001 | GUI or command line? | Changes the interaction architecture. | OPEN |\n",
+            encoding="utf-8",
+        )
+        session = intake.create_intake_session(self.pre, self.root, template_path=self.template, respondent="Reviewer")
+        questions = session["document"]["records"]["questions"]
+
+        self.assertEqual("Q-B001", questions[0]["id"])
+        self.assertEqual("GUI or command line?", questions[0]["fields"]["question"])
+        self.assertIn("Q-B001", session["question_plan"]["material_decision_ids"])
+
+    def test_sec_001_rejects_invalid_text_before_conditionals(self):
+        session = intake.create_intake_session(self.pre, self.root, template_path=self.template, respondent="Reviewer")
+        intake.provide_answer(session, "SEC-001", "YES", reviewer="Reviewer")
+        self.assertNotEqual("NOT_APPLICABLE", session["document"]["answers"]["SEC-001-CATEGORIES"]["state"])
+
+        with self.assertRaisesRegex(ValueError, "SEC-001 must be one of: (NO, YES|YES, NO)"):
+            intake.provide_answer(session, "SEC-001", "not sure", reviewer="Reviewer")
+        self.assertNotEqual("NOT_APPLICABLE", session["document"]["answers"]["SEC-001-CATEGORIES"]["state"])
+
+    def test_explicit_unknown_deferred_rejected_and_conflict_have_distinct_queue_reasons(self):
+        document = intake.questionnaire.new_answers(str(self.template), str(self.root), "Reviewer")
+        cases = {
+            "OVR-001": ("UNKNOWN", "UNKNOWN", "EXPLICIT_UNKNOWN"),
+            "OVR-002": ("DEFERRED", "DEFERRED", "DEFERRED"),
+            "OVR-005": ("UNKNOWN", "UNKNOWN", "REJECTED"),
+            "OVR-007": ("UNKNOWN", "UNKNOWN", "CONFLICTED"),
+        }
+        for qid, (value, state, source_status) in cases.items():
+            intake.questionnaire.set_answer(document, qid, value, state, "SOURCE_ARTIFACT", "source.md")
+            document["answers"][qid].update({"source_status": source_status, "review_priority": "MEDIUM", "review_disposition": "SEEDED_PENDING_REVIEW"})
+        queues = intake.build_review_queues(document, {}, {"blocking_ids": []})
+        reasons = {item["id"]: item["reason"] for item in queues["needs_answer"]}
+
+        self.assertEqual("source explicitly records UNKNOWN", reasons["OVR-001"])
+        self.assertEqual("source answer was explicitly rejected and needs replacement", reasons["OVR-005"])
+        self.assertEqual("conflicting source answers require human resolution", reasons["OVR-007"])
+        deferred = next(item for item in queues["needs_confirmation"] if item["id"] == "OVR-002")
+        self.assertEqual("answer is deferred until a later phase or gate", deferred["reason"])
 
     def test_missing_answer_queue_items_recommend_human_provided_state(self):
         session = intake.create_intake_session(
@@ -201,7 +358,7 @@ class IntakeSessionTests(unittest.TestCase):
             respondent="Reviewer",
         )
         record_id = next(iter(session["created_records"].values()))[0]
-        record_item = next(item for item in session["review_queues"]["needs_confirmation"] if item["id"] == record_id)
+        record_item = next(item for item in session["review_queues"]["repeated_records_pending_review"] if record_id in item["record_ids"])
 
         self.assertEqual("Functional Requirements", record_item["record_context"]["label"])
         self.assertEqual("Functional requirements", record_item["record_context"]["group"])
@@ -249,6 +406,25 @@ class IntakeSessionTests(unittest.TestCase):
         self.assertEqual("HUMAN_CONFIRMED", updated["review_disposition"])
         self.assertNotIn("PKG-003", needs_answer_ids)
 
+    def test_restricted_content_human_answer_is_durable(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+
+        intake.provide_answer(session, "SEC-001", "no", reviewer="Reviewer")
+        reloaded = intake.load_intake_session(session["session_dir"])
+        restricted = reloaded["document"]["answers"]["SEC-001"]
+
+        self.assertEqual("NO", restricted["value"])
+        self.assertEqual("PROVIDED", restricted["state"])
+        self.assertEqual("HUMAN_DECLARATION", restricted["source_type"])
+        self.assertEqual("ArtPkg intake UI", restricted["source_reference"])
+        self.assertEqual("HUMAN_CONFIRMED", restricted["review_disposition"])
+        self.assertNotIn("SEC-001", {item["id"] for item in reloaded["review_queues"]["needs_answer"]})
+
     def test_confirm_and_reject_seeded_records_are_durable(self):
         session = intake.create_intake_session(
             self.pre,
@@ -269,6 +445,90 @@ class IntakeSessionTests(unittest.TestCase):
         self.assertEqual("Record needs replacement", rejected["rejection_reason"])
         self.assertEqual("HUMAN_REJECTED", intake.questionnaire.find_record(reloaded["document"], record_id)["review_disposition"])
         self.assertIn(record_id, needs_answer_ids)
+
+    def test_advance_record_status_sets_field_and_history_without_touching_review_disposition(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+        record_id = session["created_records"]["functional_requirements"][0]
+        before = intake.questionnaire.find_record(session["document"], record_id)
+        self.assertEqual("PROPOSED", before["fields"]["status"])
+        self.assertNotIn("review_disposition", before)
+
+        updated = intake.advance_record_status(session, record_id, "ACCEPTED", reviewer="Reviewer")
+
+        self.assertEqual("ACCEPTED", updated["fields"]["status"])
+        self.assertNotIn("review_disposition", updated, "advance_record_status must not fabricate review_disposition")
+        self.assertEqual(1, len(updated["status_history"]))
+        entry = updated["status_history"][0]
+        self.assertEqual({"field": "status", "from": "PROPOSED", "to": "ACCEPTED", "reviewer": "Reviewer"},
+                         {k: v for k, v in entry.items() if k != "timestamp"})
+
+        reloaded = intake.load_intake_session(session["session_dir"])
+        persisted = intake.questionnaire.find_record(reloaded["document"], record_id)
+        self.assertEqual("ACCEPTED", persisted["fields"]["status"])
+        self.assertEqual(1, len(persisted["status_history"]))
+
+    def test_advance_record_status_rejects_value_outside_category_enum(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+        record_id = session["created_records"]["functional_requirements"][0]
+
+        with self.assertRaises(ValueError):
+            intake.advance_record_status(session, record_id, "NOT_A_REAL_STATUS", reviewer="Reviewer")
+
+        unchanged = intake.questionnaire.find_record(session["document"], record_id)
+        self.assertEqual("PROPOSED", unchanged["fields"]["status"])
+
+    def test_advance_record_status_rejects_category_with_no_status_field(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+        session["document"]["records"].setdefault("actors", []).append({
+            "id": "ACT-TEST", "fields": {"name": "Test actor", "role_type": "USER"},
+            "source_type": "HUMAN_DECLARATION",
+        })
+
+        with self.assertRaises(ValueError):
+            intake.advance_record_status(session, "ACT-TEST", "ACCEPTED", reviewer="Reviewer")
+
+    def test_advance_record_status_rejects_unknown_record_id(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+
+        with self.assertRaises(KeyError):
+            intake.advance_record_status(session, "FR-999", "ACCEPTED", reviewer="Reviewer")
+
+    def test_advance_record_status_uses_residual_status_field_for_risks(self):
+        session = intake.create_intake_session(
+            self.pre,
+            self.root,
+            template_path=self.template,
+            respondent="Reviewer",
+        )
+        risk_ids = session["created_records"].get("risks")
+        if not risk_ids:
+            self.skipTest("fixture seeded no risks records")
+        record_id = risk_ids[0]
+
+        updated = intake.advance_record_status(session, record_id, "MITIGATED", reviewer="Reviewer")
+
+        self.assertEqual("MITIGATED", updated["fields"]["residual_status"])
+        self.assertEqual("residual_status", updated["status_history"][0]["field"])
 
     def test_rejected_sensitive_answers_remain_in_specialist_queues(self):
         session = intake.create_intake_session(

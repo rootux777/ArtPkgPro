@@ -1,0 +1,8 @@
+{
+  "canonicalization_vectors_sha256": "845953bc9da09e0519c4c04287009552b1bb7f6ac18ea8134c2b9ab1fda04ad3",
+  "candidate_manifest_sha256": "d1b695a8f06a76314fa98a0fea8dae9beb34af14517387d3ca9900422dbf65f2",
+  "candidate_read_only_path": "/home/rootux/artpkg-sdlc-contract-review/v0.1/artpkg-fixture-revision-candidate-r2",
+  "corrected_producer_contract_sha256": "c1bf91b46eae9aaf8c188799fe1d3f408bef7d04c04f61081baa65827b4255be",
+  "outer_sha256s_sha256": "14d49a9a1a6afba94e72765d59b26dfb0b3b96208ceda0e9cc48ffed7601ceac",
+  "purpose": "Read-only provenance for accepted Phase 1 contract fixture tests. The external candidate is never modified."
+}

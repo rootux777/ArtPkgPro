@@ -1,0 +1,25 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "ArtPkg: Authenticate DSH",
+			"type": "shell",
+			"command": "/home/rootux/Downloads/ArtPkg/ArtPkgPro/.venv/bin/python",
+			"args": [
+				"/home/rootux/Downloads/ArtPkg/ArtPkgPro/tools/artpkg_dsh_setup.py",
+				"--user",
+				"tester1",
+				"--base-url",
+				"http://127.0.0.1:3080"
+			],
+			"isBackground": false,
+			"presentation": {
+				"reveal": "always",
+				"focus": true,
+				"panel": "dedicated",
+				"clear": true
+			},
+			"problemMatcher": []
+		}
+	]
+}

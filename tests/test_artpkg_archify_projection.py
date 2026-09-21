@@ -84,15 +84,39 @@ class ArchifyProjectionTests(unittest.TestCase):
 
         self.assertEqual("Open review queue", actions["reviewQueues"]["label"])
         self.assertEqual("needs_answer", actions["reviewQueues"]["queue"])
-        self.assertEqual("reviewQueues", actions["reviewQueues"]["focus"])
+        self.assertIn(
+            actions["reviewQueues"]["focus"],
+            {item["id"] for item in self.session["review_queues"]["needs_answer"]},
+        )
+        self.assertTrue(actions["reviewQueues"]["available"])
         self.assertIn("Needs answer:", actions["reviewQueues"]["summary"])
         self.assertEqual("Answer AUT-001 in ArtPkg", actions["authorityState"]["label"])
         self.assertEqual("AUT-001", actions["authorityState"]["focus"])
         self.assertEqual("authority_sensitive", actions["authorityState"]["queue"])
         self.assertIn("constrains Gate Readiness", actions["authorityState"]["impact"])
         self.assertEqual("Review acceptance criteria in ArtPkg", actions["acceptanceCriteria"]["label"])
-        self.assertEqual("AC-SET", actions["acceptanceCriteria"]["focus"])
-        self.assertEqual("evidence_sensitive", actions["acceptanceCriteria"]["queue"])
+        self.assertEqual("", actions["acceptanceCriteria"]["focus"])
+        self.assertFalse(actions["acceptanceCriteria"]["available"])
+
+    def test_acceptance_projection_action_targets_real_open_record(self):
+        intake.questionnaire.add_record(
+            self.session["document"],
+            "acceptance_criteria",
+            {"pass_condition": "A reviewable outcome exists", "status": "PROPOSED"},
+            record_id="AC-001",
+        )
+        intake._refresh_session(self.session)
+
+        result = projection.build_readiness_projection(self.session)
+        action = next(
+            node["artpkg_review_action"]
+            for node in result.mapping["nodes"]
+            if node["archify_id"] == "acceptanceCriteria"
+        )
+
+        self.assertEqual("repeated_records_pending_review", action["queue"])
+        self.assertEqual("SECTION-acceptance_criteria", action["focus"])
+        self.assertTrue(action["available"])
 
     def test_projection_rejects_unmapped_node(self):
         result = projection.build_readiness_projection(self.session)
